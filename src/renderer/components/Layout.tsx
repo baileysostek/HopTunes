@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Box } from '@mui/material';
+import { Box, SwipeableDrawer } from '@mui/material';
 import TitleBar from './TitleBar';
 import Sidebar from './Sidebar';
 import SearchBar from './SearchBar';
@@ -11,7 +11,7 @@ import SongContextMenu from './SongContextMenu';
 import AlbumContextMenu from './AlbumContextMenu';
 import AlbumEditModal from './AlbumEditModal';
 import ReindexOverlay from './ReindexOverlay';
-import { isElectron } from '../utils/platform';
+import { isElectron, isMobile } from '../utils/platform';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -26,6 +26,53 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }, []);
   const closeAlbumEdit = useCallback(() => setAlbumEdit(null), []);
   const showConnect = isElectron();
+  const mobile = isMobile();
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const openSidebar = useCallback(() => setSidebarOpen(true), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  if (mobile) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: 'background.default', paddingTop: 'env(safe-area-inset-top)' }}>
+        {/* Mobile sidebar drawer */}
+        <SwipeableDrawer
+          anchor="left"
+          open={sidebarOpen}
+          onOpen={openSidebar}
+          onClose={closeSidebar}
+          swipeAreaWidth={20}
+          disableBackdropTransition
+          PaperProps={{ sx: { width: 280, bgcolor: 'background.default' } }}
+        >
+          <Sidebar
+            onSettingsClick={() => { closeSidebar(); openSettingsModal(); }}
+            onNavigate={closeSidebar}
+          />
+        </SwipeableDrawer>
+
+        {/* Main content */}
+        <SearchBar onMenuClick={openSidebar} />
+        <Box sx={{ flex: 1, overflow: 'auto', contain: 'strict' }}>
+          {children}
+        </Box>
+
+        {/* Bottom: now playing */}
+        <NowPlayingBar />
+
+        <SettingsModal open={settingsModalOpen} onClose={closeSettingsModal} />
+        <SongContextMenu />
+        <AlbumContextMenu onEditAlbum={handleEditAlbum} />
+        <AlbumEditModal
+          artist={albumEdit?.artist ?? ''}
+          album={albumEdit?.album ?? ''}
+          open={albumEdit !== null}
+          onClose={closeAlbumEdit}
+        />
+        <ReindexOverlay />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: 'background.default' }}>

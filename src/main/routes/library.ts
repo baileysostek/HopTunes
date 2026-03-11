@@ -8,6 +8,7 @@ import { SongRow } from '../database';
 import { getAllSongs, hideSongByPath, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation } from '../database';
 import { indexLibrary } from '../indexer';
 import { MUSIC_DIR } from '../config';
+import { isLocalAddress } from '../auth';
 
 export interface LibraryRouterDeps {
   broadcastToClients: (message: ServerWsMessage) => void;
@@ -145,8 +146,12 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
   });
 
-  // POST /api/library/locations — add a media location, then reindex
+  // POST /api/library/locations — add a media location, then reindex (localhost only)
   router.post('/library/locations', async (req: Request, res: Response) => {
+    if (!isLocalAddress(req.socket.remoteAddress)) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
     const { path: locationPath } = req.body;
     if (!locationPath || typeof locationPath !== 'string') {
       res.status(400).json({ error: 'missing path' });
@@ -170,8 +175,12 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
   });
 
-  // DELETE /api/library/locations — remove a media location, then reindex
+  // DELETE /api/library/locations — remove a media location, then reindex (localhost only)
   router.delete('/library/locations', async (req: Request, res: Response) => {
+    if (!isLocalAddress(req.socket.remoteAddress)) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
     const { path: locationPath } = req.body;
     if (!locationPath || typeof locationPath !== 'string') {
       res.status(400).json({ error: 'missing path' });

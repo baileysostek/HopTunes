@@ -1,0 +1,287 @@
+# Federated Music Libraries for OpenTunes
+
+## Context
+
+Currently, the Electron host owns all music — it runs the Express server, SQLite database, and serves audio files. Edge devices (Android/browser) are thin clients that receive the library from the host and stream audio from it. The goal is to let edge devices contribute their own local music to a **unified library** (the union of all songs across all devices), including the ability for the host or other devices to play songs that only exist on an edge device via reverse streaming.
+
+---
+
+## Phase 1: Shared Types & Protocol Extension
+
+**No runtime behavior changes — just define the foundation.**
+
+### `src/shared/types.ts` — Extend existing types
+
+- Add optional `origin` field to `Song`:
+  ```typescript
+  origin?: { deviceId: string; deviceName: string; available: boolean }
+  ```
+  - `undefined` = host-local (backward compatible — no existing code breaks)
+  - `available: false` when source device is offline
+
+- Add `EdgeSongMeta` interface (metadata sent from edge device to host):
+  ```typescript
+  { localPath, title, artist, album, duration, trackNumber, hash, hasArt, mimeType, fileSize }
+  ```
+
+- Extend `ClientWsMessage` with:
+  - `edge-library` — edge device announces its full local library
+  - `edge-library-update` — incremental hash updates
+  - `edge-audio-response` / `edge-art-response` — responses to host requests
+
+- Extend `ServerWsMessage` with:
+  - `request-audio` — host asks edge device for a file
+  - `request-art` — host asks edge device for album art
+
+### New: `src/shared/federation.ts` — Pure merge/dedup functions
+
+- `mergeLibraries(hostSongs, edgeLibraries, onlineDevices) -> Song[]`
+- `deduplicateSongs(songs) -> Song[]`
+  - Primary: hash match (prefer host copy)
+  - Fallback: title + artist + |durationA - durationB| < 2s
+
+### Path convention for song routing
+
+| Source | `path` field | `art` field |
+|--------|-------------|-------------|
+| Host | `/api/audio/<encoded_path>` (unchanged) | `/api/art/<encoded_path>` (unchanged) |
+| Edge | `/api/audio/remote/<deviceId>/<encoded_path>` | `/api/art/remote/<deviceId>/<encoded_path>` |
+
+`getMediaUrl()` in `src/renderer/types/song.ts` works unchanged for both — it just prepends the API base.
+
+---
+
+## Phase 2: Host-Side Federation Manager
+
+### New: `src/main/federation.ts`
+
+In-memory state manager on the host:
+
+- `Map<deviceId, { deviceName, ws, songs: EdgeSongMeta[], lastSeen }>` — edge device libraries
+- `registerEdgeLibrary(deviceId, deviceName, ws, songs)` — store an edge device's library
+- `unregisterEdgeDevice(deviceId)` — mark device's songs as unavailable
+- `getUnifiedLibrary(): Song[]` — merge host SQLite songs + all edge libraries, dedup, sort
+- `requestAudioFromEdge(deviceId, localPath): Promise<string>` — request file, cache to disk, return cache path
+- `requestArtFromEdge(deviceId, localPath): Promise<Buffer | null>` — request embedded art
+
+**Cache-on-demand reverse streaming:**
+
+1. `GET /api/audio/remote/:deviceId/:file` hits the host
+2. Check `<userData>/edge-cache/<deviceId>/` for cached copy
+3. If cached → serve with existing range-request streaming logic
+4. If not cached:
+   - Send `{ type: 'request-audio', requestId, localPath }` to edge device via WebSocket
+   - Edge device reads file, sends binary WebSocket frames back
+   - Host writes to temp file → moves to cache → serves
+   - 30-second timeout → 503 if edge device doesn't respond
+5. Dedup pending requests (same deviceId+path piggybacks on existing transfer)
+
+**Why cache-on-demand, not real-time proxy:** WebSocket is a message protocol, not a streaming protocol. Proxying HTTP Range semantics through WebSocket would be extremely complex. Caching the full file first is dramatically simpler. After first play, songs stream instantly from local disk. Tradeoff: ~3s delay on first play for a 10MB MP3 on 100Mbps WiFi.
+
+**Why in-memory, not SQLite:** Edge libraries are transient. Persisting creates stale-data problems when devices change their library offline. Memory cost is ~2MB per 10k songs — negligible.
+
+### Modify: `src/main/index.ts` — WebSocket message routing
+
+- Handle new client→server messages: `edge-library`, `edge-library-update`, `edge-audio-response`, `edge-art-response`, plus binary frames
+- On `edge-library`: register with federation manager, broadcast unified library
+- On `ws.close`: unregister device, broadcast updated library (songs now `available: false`)
+- Change welcome message to use `federation.getUnifiedLibrary()` instead of raw SQLite rows
+- Enable `perMessageDeflate: true` on WebSocket server for compression
+
+### Modify: `src/main/routes/library.ts`
+
+- Add routes: `GET /api/audio/remote/:deviceId/:file` and `GET /api/art/remote/:deviceId/:file`
+- Change `GET /api/library` to return `federation.getUnifiedLibrary()`
+- Change all library broadcast points (reindex, hide, set-hidden) to use unified library
+
+---
+
+## Phase 3: Android MediaStore Scanner (Capacitor Plugin)
+
+### Modify: `android/app/src/main/AndroidManifest.xml`
+
+```xml
+<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />          <!-- API 33+ -->
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="32" />                                                <!-- API < 33 -->
+```
+
+### New: `android/app/src/main/java/com/opentunes/app/LocalLibraryPlugin.java`
+
+Capacitor plugin (follows existing `MediaControlsPlugin` pattern):
+
+- `scanLibrary()` — queries `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for all audio files. Returns: file path, title, artist, album, duration, track number, mime type, file size, album art availability. **Much faster than filesystem walking** — MediaStore is pre-indexed by Android.
+- `getFileBytes(localPath)` — reads a local audio file in chunks for reverse streaming
+- `getEmbeddedArt(localPath)` — extracts embedded album art, returns base64
+- `computeHash(localPath)` — SHA256 of a specific file (called lazily, not on scan)
+- Must request runtime permissions on Android 13+ (`READ_MEDIA_AUDIO`)
+
+### Modify: `android/app/.../MainActivity.java`
+
+- Register `LocalLibraryPlugin.class`
+
+### New: `src/renderer/services/localLibrary.ts`
+
+Client-side orchestrator (only initializes on Capacitor via `isCapacitor()` check):
+
+- On init: call `LocalLibrary.scanLibrary()` → convert to `EdgeSongMeta[]` → send `edge-library` WS message
+- Handle incoming `request-audio`: read file via `LocalLibrary.getFileBytes()`, send binary frames back over WebSocket
+- Handle incoming `request-art`: read art via `LocalLibrary.getEmbeddedArt()`, send base64 back
+- Re-scan on app foreground (`visibilitychange` event) if >5 minutes since last scan
+
+### Modify: `src/renderer/store/playerStore.ts`
+
+- In WS message handler, route `request-audio` and `request-art` to `localLibrary` service
+
+### Data flow: Edge library sync
+
+```
+Android app boots
+  → localLibrary.init() → LocalLibrary.scanLibrary() (queries MediaStore)
+  → Sends WS: { type: 'edge-library', deviceId, songs: EdgeSongMeta[] }
+  → Host: federation.registerEdgeLibrary()
+  → Host: getUnifiedLibrary() merges host + edge songs
+  → Host: broadcastToClients({ type: 'library', data: unifiedSongs })
+  → All clients see the merged library
+```
+
+### Data flow: Reverse audio streaming
+
+```
+User clicks play on edge-device song
+  → POST /api/playback/play → state broadcast → active device loads audio
+  → GET /api/audio/remote/<deviceId>/<path>
+  → Host checks cache → miss
+  → Host sends WS { type: 'request-audio', requestId, localPath } to edge device
+  → Edge reads file → sends binary WS frames → Host writes to cache
+  → Host serves cached file with Range support
+```
+
+---
+
+## Phase 4: Availability Tracking & Playback Resilience
+
+### Modify: `src/main/federation.ts`
+
+- `onEdgeDeviceDisconnect(deviceId)`:
+  - Mark all songs from device as `available: false`
+  - Broadcast updated library
+  - If currently playing song is from this device AND not cached:
+    - Check if same hash exists on another source → swap path
+    - If no alternative: auto-skip to next in queue
+
+- `onEdgeDeviceReconnect(deviceId)`:
+  - Mark songs as `available: true`
+  - Broadcast updated library
+
+### Modify: `src/main/playback.ts`
+
+- Add `handleSongSourceLost(song)` — called when source device disconnects and file not cached. Auto-skips or stops playback.
+
+### Local playback shortcut
+
+When the active playback device IS the device that owns the song → play directly from local file, no round-trip through host.
+
+**Modify: `src/renderer/store/playerStore.ts`** — In `applyServerState()`:
+- If `song.origin?.deviceId === thisDeviceId`, use `Capacitor.convertFileSrc(localPath)` or the local file URL instead of `getMediaUrl(song.path)`
+
+**Modify: `src/renderer/services/localLibrary.ts`** — Add `getLocalFileUrl(localPath): string`
+
+### Modify: `src/main/routes/library.ts`
+
+- Remote audio route: check device online status. If offline but cached → serve cache. If offline and not cached → 503.
+
+---
+
+## Phase 5: UI Enhancements
+
+### Song display — show origin
+
+- **Track rows**: subtle device icon/badge for edge-device songs; dim unavailable songs; show device name on hover
+- **NowPlayingBar**: small source indicator when playing an edge-device song
+- **Sidebar**: "Sources" section showing connected devices with song counts and online/offline status
+
+### Settings
+
+- Toggle to enable/disable sharing local music (edge devices)
+- Cache size display + "Clear Cache" button (host)
+- List of contributing devices with "Forget" option
+
+---
+
+## Phase 6: Background Hashing & Incremental Sync
+
+After initial fast sync (metadata only), compute hashes in background:
+
+1. Process files in batches of 20-50
+2. Send `edge-library-update` messages with `{ localPath, hash }` pairs
+3. Pause when app backgrounded, resume when foregrounded
+4. Host re-runs dedup for affected songs; broadcasts if results change
+5. Cache invalidation: on reconnect, compare hashes — delete stale cache entries
+
+---
+
+## File Summary
+
+### New files (4)
+
+| File | Purpose |
+|------|---------|
+| `src/shared/federation.ts` | Pure merge/dedup functions |
+| `src/main/federation.ts` | Host-side federation state manager + cache |
+| `src/renderer/services/localLibrary.ts` | Client-side scanning + reverse streaming handler |
+| `android/.../LocalLibraryPlugin.java` | Capacitor plugin for MediaStore + file access |
+
+### Modified files (10)
+
+| File | Changes |
+|------|---------|
+| `src/shared/types.ts` | `Song.origin`, `EdgeSongMeta`, new WS message types |
+| `src/main/index.ts` | WS routing for edge messages + binary frames, unified welcome |
+| `src/main/routes/library.ts` | Remote audio/art routes, unified library broadcasts |
+| `src/main/playback.ts` | `handleSongSourceLost()` for failover |
+| `src/renderer/store/playerStore.ts` | Route new WS messages, local playback shortcut |
+| `android/.../AndroidManifest.xml` | `READ_MEDIA_AUDIO` + `READ_EXTERNAL_STORAGE` |
+| `android/.../MainActivity.java` | Register `LocalLibraryPlugin` |
+| `src/renderer/components/` (various) | Origin indicators, availability UI |
+| `src/renderer/components/Sidebar.tsx` | Device sources section |
+| `src/renderer/components/SettingsModal.tsx` | Federation settings |
+
+### Unchanged (no modifications needed)
+
+| File | Why |
+|------|-----|
+| `src/renderer/types/song.ts` | `getMediaUrl()` already works for both path conventions |
+| `src/renderer/nativeMediaSession.ts` | Pushes `Song` objects which now include `origin` transparently |
+| `capacitor.config.ts` | HTTP cleartext already enabled |
+
+---
+
+## Implementation Order
+
+```
+Phase 1 (types)          ← no dependencies, start here
+    ↓
+Phase 2 (host federation) ← depends on Phase 1
+    ↓
+Phase 3 (Android scanner) ← depends on Phases 1 + 2
+    ↓
+Phase 4 (resilience)      ← depends on Phases 2 + 3
+    ↓
+Phase 5 (UI)              ← can start after Phase 1, polish after Phase 4
+    ↓
+Phase 6 (bg hashing)      ← depends on Phase 3
+```
+
+Phases 1+2 = minimum testable feature (mock edge data). Phase 3 = real on Android. Phases 4-6 = hardening.
+
+---
+
+## Verification Plan
+
+1. **Phase 1-2**: Unit test `mergeLibraries()` and `deduplicateSongs()` with mock data. Manually inject fake edge library via WebSocket client tool. Confirm unified library appears on desktop.
+2. **Phase 3**: Build and deploy to Android device. Confirm `READ_MEDIA_AUDIO` permission prompt appears. Verify `scanLibrary()` returns local songs. Verify edge library appears in host's unified library.
+3. **Reverse streaming**: Play an edge-only song from the desktop. Confirm audio streams successfully after initial cache delay. Confirm subsequent plays are instant (cached).
+4. **Availability**: Disconnect Android device. Confirm edge songs marked unavailable. Confirm playback auto-skips unavailable songs. Reconnect device. Confirm songs become available again.
+5. **Local shortcut**: On Android, play a song that exists on that device. Confirm it plays locally without hitting the host's audio endpoint.
+6. **Dedup**: Add the same song to both host and Android. Confirm only one copy appears in the library (host copy preferred).

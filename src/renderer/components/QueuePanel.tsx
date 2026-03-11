@@ -4,6 +4,7 @@ import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore } from '../store/playerStore';
 import { getMediaUrl, Song } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
+import { isMobile } from '../utils/platform';
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '--:--';
@@ -176,6 +177,104 @@ const QueuePanel: React.FC = () => {
     play(song);
   }, [play]);
 
+  const mobile = isMobile();
+
+  // On mobile, render as a full-screen overlay
+  if (mobile) {
+    if (!queueVisible) return null;
+    return (
+      <Box sx={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        bgcolor: 'background.default',
+        zIndex: 1400,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        paddingTop: 'env(safe-area-inset-top)',
+      }}>
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          px: 2,
+          pt: 2,
+          pb: 1.5,
+          borderBottom: '1px solid',
+          borderBottomColor: 'divider',
+        }}>
+          <Typography sx={{ fontSize: 18, fontWeight: 700, color: 'text.primary' }}>
+            Queue
+          </Typography>
+          <Box
+            onClick={toggleQueue}
+            sx={{ cursor: 'pointer', color: 'text.secondary', display: 'flex', alignItems: 'center', p: 1 }}
+          >
+            <RemoveIcon />
+          </Box>
+        </Box>
+
+        <Box sx={{ flex: 1, overflow: 'auto', px: 1 }}>
+          {currentTrack && (
+            <Box sx={{ py: 1.5 }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1, px: 1, mb: 0.5 }}>
+                Now Playing
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', py: 0.75, px: 1, borderRadius: 1, bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
+                <Box sx={{ width: 36, height: 36, borderRadius: 0.5, overflow: 'hidden', bgcolor: 'background.paper', mr: 1.5, flexShrink: 0 }}>
+                  {currentTrack.art ? (
+                    <Box component="img" src={getMediaUrl(currentTrack.art!)} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : externalArt ? (
+                    <Box component="img" src={externalArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : null}
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontSize: 14, fontWeight: 500, color: theme.palette.primary.main, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {currentTrack.title}
+                  </Typography>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {currentTrack.artist}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+          )}
+
+          <Box sx={{ py: 1 }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1, px: 1, mb: 0.5 }}>
+              Up Next {queue.length > 0 ? `(${queue.length})` : ''}
+            </Typography>
+            {queue.length === 0 ? (
+              <Typography sx={{ fontSize: 13, color: 'text.disabled', px: 1, py: 2, textAlign: 'center' }}>
+                Queue is empty
+              </Typography>
+            ) : (
+              queue.map((song, idx) => (
+                <QueueItem
+                  key={`${song.path}-${idx}`}
+                  song={song}
+                  index={idx}
+                  dragIndex={dragIndex}
+                  dropTarget={dropTarget}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onDragEnd={handleDragEnd}
+                  onRemove={removeFromQueue}
+                  onPlay={handlePlay}
+                />
+              ))
+            )}
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Desktop: inline side panel
   return (
     <Box sx={{
       width: queueVisible ? 320 : 0,

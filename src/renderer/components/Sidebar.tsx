@@ -19,9 +19,10 @@ const ConnectIcon = () => (
 interface SidebarProps {
   onConnectClick?: () => void;
   onSettingsClick?: () => void;
+  onNavigate?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) => {
+const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick, onNavigate }) => {
   const songs = useLibraryStore(s => s.songs);
   const selectedArtist = useLibraryStore(s => s.selectedArtist);
   const setSelectedArtist = useLibraryStore(s => s.setSelectedArtist);
@@ -77,7 +78,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
           {/* All Artists option */}
           <ListItemButton
             selected={selectedArtist === null}
-            onClick={() => { setSelectedArtist(null); navigate('/'); }}
+            onClick={() => { setSelectedArtist(null); navigate('/'); onNavigate?.(); }}
             sx={{
               borderRadius: 1,
               mb: 0.25,
@@ -120,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
             <ListItemButton
               key={artist}
               selected={selectedArtist === artist}
-              onClick={() => { setSelectedArtist(artist); navigate('/'); }}
+              onClick={() => { setSelectedArtist(artist); navigate('/'); onNavigate?.(); }}
               sx={{
                 borderRadius: 1,
                 mb: 0.25,

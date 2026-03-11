@@ -479,17 +479,19 @@ const LibraryTab = () => {
                   </Typography>
                 )}
               </Box>
-              <IconButton
-                size="small"
-                onClick={() => handleRemoveFolder(loc)}
-                sx={{
-                  color: 'text.disabled',
-                  '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) },
-                }}
-                title="Remove folder"
-              >
-                <DeleteIcon />
-              </IconButton>
+              {isElectron() && (
+                <IconButton
+                  size="small"
+                  onClick={() => handleRemoveFolder(loc)}
+                  sx={{
+                    color: 'text.disabled',
+                    '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) },
+                  }}
+                  title="Remove folder"
+                >
+                  <DeleteIcon />
+                </IconButton>
+              )}
             </Box>
           ))}
         </Box>

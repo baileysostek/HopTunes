@@ -4,6 +4,7 @@ import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore, DeviceInfo } from '../store/playerStore';
 import { getMediaUrl } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
+import { isMobile } from '../utils/platform';
 
 function formatTime(seconds: number): string {
   if (!seconds || isNaN(seconds)) return '0:00';
@@ -107,10 +108,299 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
   );
 
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
 
   const activeDevice = devices.find(d => d.id === activeDeviceId);
   const playingElsewhere = !!activeDeviceId && activeDeviceId !== thisDeviceId;
+  const mobile = isMobile();
 
+  const artSrc = currentTrack?.art
+    ? getMediaUrl(currentTrack.art)
+    : externalArt || null;
+
+  // ── Mobile: compact bar + expandable full-screen player ──
+  if (mobile) {
+    return (
+      <>
+        {/* Compact bottom bar */}
+        <Box
+          onClick={() => currentTrack && setMobileExpanded(true)}
+          sx={{
+            height: 64,
+            bgcolor: 'background.paper',
+            borderTop: '1px solid',
+            borderTopColor: 'divider',
+            display: 'flex',
+            alignItems: 'center',
+            px: 1.5,
+            flexShrink: 0,
+            gap: 1.5,
+          }}
+        >
+          {/* Mini album art */}
+          <Box sx={{
+            width: 44,
+            height: 44,
+            borderRadius: 1,
+            overflow: 'hidden',
+            bgcolor: 'background.default',
+            flexShrink: 0,
+          }}>
+            {artSrc ? (
+              <Box component="img" src={artSrc} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.disabled' }}>
+                <MusicNoteIcon />
+              </Box>
+            )}
+          </Box>
+
+          {/* Track info */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {currentTrack?.title || 'No track playing'}
+            </Typography>
+            {currentTrack && (
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {currentTrack.artist}
+              </Typography>
+            )}
+          </Box>
+
+          {/* Play/pause + next */}
+          <Box
+            onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+            sx={{ color: 'text.primary', display: 'flex', alignItems: 'center', p: 1 }}
+          >
+            <PlayPauseIcon isPlaying={isPlaying} />
+          </Box>
+          <Box
+            onClick={(e) => { e.stopPropagation(); next(); }}
+            sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', p: 1 }}
+          >
+            <NextIcon />
+          </Box>
+        </Box>
+
+        {/* Expanded full-screen player */}
+        {mobileExpanded && (
+          <Box sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            bgcolor: 'background.default',
+            zIndex: 1300,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            paddingTop: 'env(safe-area-inset-top)',
+          }}>
+            {/* Close handle */}
+            <Box
+              onClick={() => setMobileExpanded(false)}
+              sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                pt: 1.5,
+                pb: 1,
+                cursor: 'pointer',
+              }}
+            >
+              <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: 'text.disabled' }} />
+            </Box>
+
+            {/* Large album art */}
+            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', px: 4, minHeight: 0 }}>
+              <Box sx={{
+                width: '100%',
+                maxWidth: 320,
+                aspectRatio: '1',
+                borderRadius: 2,
+                overflow: 'hidden',
+                bgcolor: 'background.paper',
+              }}>
+                {artSrc ? (
+                  <Box component="img" src={artSrc} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.disabled' }}>
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                    </svg>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+
+            {/* Track info */}
+            <Box sx={{ px: 4, pt: 2, pb: 1 }}>
+              <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {currentTrack?.title || 'No track'}
+              </Typography>
+              <Typography sx={{ fontSize: 16, color: 'text.secondary' }}>
+                {currentTrack?.artist || ''}
+              </Typography>
+            </Box>
+
+            {/* Seek bar */}
+            <Box sx={{ px: 4, display: 'flex', alignItems: 'center' }}>
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
+                {formatTime(currentTime)}
+              </Typography>
+              <Slider
+                size="small"
+                value={currentTime || 0}
+                max={duration || 1}
+                onChange={(_, val) => seek(val as number)}
+                sx={{
+                  mx: 1.5,
+                  color: 'text.primary',
+                  height: 4,
+                  '& .MuiSlider-thumb': { width: 14, height: 14, transition: 'none', '&:hover, &.Mui-focusVisible': { boxShadow: 'none' } },
+                  '& .MuiSlider-track': { transition: 'none' },
+                  '& .MuiSlider-rail': { bgcolor: 'divider' },
+                }}
+              />
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>
+                {formatTime(duration)}
+              </Typography>
+            </Box>
+
+            {/* Playback controls */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, py: 3 }}>
+              <Box onClick={prev} sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', p: 1 }}>
+                <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="1" y="2" width="2" height="12" />
+                  <polygon points="14,2 5,8 14,14" />
+                </svg>
+              </Box>
+              <Box
+                onClick={togglePlay}
+                sx={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: '50%',
+                  bgcolor: 'white',
+                  color: '#000',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+                  <path d={isPlaying ? PAUSE_LEFT : PLAY_LEFT} />
+                  <path d={isPlaying ? PAUSE_RIGHT : PLAY_RIGHT} />
+                </svg>
+              </Box>
+              <Box onClick={next} sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', p: 1 }}>
+                <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
+                  <polygon points="2,2 11,8 2,14" />
+                  <rect x="13" y="2" width="2" height="12" />
+                </svg>
+              </Box>
+            </Box>
+
+            {/* Queue toggle + Device picker */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 3, pb: 4 }}>
+              <Box
+                onClick={toggleQueue}
+                sx={{
+                  color: queueVisible ? theme.palette.primary.main : 'text.secondary',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  p: 1,
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M4 6h14v2H4zm0 4h14v2H4zm0 4h10v2H4zm12 0v6l5-3z"/>
+                </svg>
+                <Typography sx={{ fontSize: 13, color: 'inherit' }}>Queue</Typography>
+              </Box>
+
+              {/* Device picker */}
+              <Box
+                onClick={() => {
+                  if (!deviceMenuOpen) syncFromServer();
+                  setDeviceMenuOpen(!deviceMenuOpen);
+                }}
+                sx={{
+                  color: playingElsewhere ? theme.palette.primary.main : 'text.secondary',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  p: 1,
+                }}
+              >
+                <SpeakerIcon />
+                <Typography sx={{ fontSize: 13, color: 'inherit' }}>
+                  {activeDevice?.name || 'Devices'}
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Device menu overlay */}
+            {deviceMenuOpen && (
+              <Box sx={{
+                position: 'absolute',
+                bottom: 80,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                minWidth: 260,
+                py: 0.5,
+                zIndex: 10,
+              }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 600, color: 'text.primary', px: 2, py: 1.5 }}>
+                  Select a device
+                </Typography>
+                {devices.map(device => (
+                  <Box
+                    key={device.id}
+                    onClick={() => {
+                      transferPlayback(device.id);
+                      setDeviceMenuOpen(false);
+                    }}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.5,
+                      px: 2,
+                      py: 1.5,
+                      bgcolor: device.id === activeDeviceId ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+                      '&:active': { bgcolor: 'action.selected' },
+                    }}
+                  >
+                    <Box sx={{ color: device.id === activeDeviceId ? theme.palette.primary.main : 'text.secondary' }}>
+                      <DeviceIcon type={device.type} />
+                    </Box>
+                    <Typography sx={{
+                      fontSize: 14,
+                      color: device.id === activeDeviceId ? theme.palette.primary.main : 'text.primary',
+                      fontWeight: device.id === activeDeviceId ? 600 : 400,
+                    }}>
+                      {device.name}
+                      {device.id === thisDeviceId ? ' (this device)' : ''}
+                    </Typography>
+                  </Box>
+                ))}
+                {devices.length === 0 && (
+                  <Typography sx={{ fontSize: 13, color: 'text.secondary', px: 2, py: 1.5 }}>
+                    No devices connected
+                  </Typography>
+                )}
+              </Box>
+            )}
+          </Box>
+        )}
+      </>
+    );
+  }
+
+  // ── Desktop layout ──
   return (
     <Box sx={{
       height: 90,
