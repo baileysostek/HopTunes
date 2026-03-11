@@ -1,0 +1,20 @@
+// See the Electron documentation for details on how to use preload scripts:
+// https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
+
+import { contextBridge, ipcRenderer } from 'electron';
+
+// Expose a limited subset of IPC functionality to the renderer process.
+// This is a crucial security step to prevent the renderer from accessing
+// all of Electron's powerful, but potentially dangerous, APIs.
+contextBridge.exposeInMainWorld('electronAPI', {
+  toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
+  capturePage: () => ipcRenderer.invoke('capture-page'),
+  saveGame: (saveName : string, saveData : object) => ipcRenderer.invoke('save-game', saveName, saveData),
+  loadGame: (saveName : string) => ipcRenderer.invoke('load-game', saveName),
+
+  // Window controls for custom titlebar
+  windowMinimize: () => ipcRenderer.send('window-minimize'),
+  windowMaximize: () => ipcRenderer.send('window-maximize'),
+  windowClose: () => ipcRenderer.send('window-close'),
+  windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+});

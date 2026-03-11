@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>My Local Spotify</title>
+  <style>
+    body { font-family: sans-serif; background: #111; color: #fff; }
+    img { width: 80px; height: 80px; border-radius: 6px; object-fit: cover; }
+    .song { display: flex; align-items: center; gap: 1em; cursor: pointer; margin: .5em 0; }
+  </style>
+</head>
+<body>
+  <h1>🎧 Local Network Player</h1>
+  <div id="library"></div>
+  <audio id="player" controls style="width:100%; margin-top:1em;"></audio>
+
+  <script>
+    const libraryDiv = document.getElementById("library");
+    const player = document.getElementById("player");
+
+    fetch("http://127.0.0.1:3000/api/library")
+      .then(res => res.json())
+      .then(songs => {
+        songs.forEach(song => {
+          const div = document.createElement("div");
+          div.className = "song";
+          div.innerHTML = `
+            <img src="${song.art || ''}" onerror="this.style.display='none'">
+            <div>
+              <div><strong>${song.title}</strong></div>
+              <div>${song.artist} — ${song.album}</div>
+            </div>
+          `;
+          div.onclick = () => {
+            player.src = song.path;
+            player.play();
+          };
+          libraryDiv.appendChild(div);
+        });
+      });
+  </script>
+</body>
+</html>

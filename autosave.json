@@ -1,0 +1,149 @@
+{
+  "unlockedSpecies": {
+    "Wild": true,
+    "Cherry": true,
+    "Yellow": false,
+    "BlueDream": false,
+    "Rili": false,
+    "Sakura": false,
+    "Orange": false,
+    "CarbonRili": false,
+    "GreenJade": false,
+    "Chocolate": false,
+    "BloodyMary": false,
+    "KingKong": false,
+    "GoldenBee": false,
+    "Strawberry": false,
+    "Blueberry": false,
+    "Grape": false,
+    "Kiwi": false,
+    "Lemon": false,
+    "Lime": false,
+    "MintChocolate": false,
+    "Lavender": false,
+    "Mocha": false,
+    "PumpkinSpice": false,
+    "Caramel": false,
+    "Cinnamon": false,
+    "Honey": false,
+    "Pistachio": false,
+    "Bubblegum": false,
+    "CottonCandy": false,
+    "Raspberry": false,
+    "Tangerine": false,
+    "Grapefruit": false,
+    "Olive": false,
+    "PeanutButter": false,
+    "Marshmallow": false,
+    "Gingerbread": false,
+    "Ruby": false,
+    "Sapphire": false,
+    "Emerald": false,
+    "Amethyst": false,
+    "Obsidian": false,
+    "Diamond": false,
+    "Garnet": false,
+    "Topaz": false,
+    "Dragonscale": false,
+    "Phoenix": false,
+    "Unicorn": false,
+    "FairyDust": false,
+    "Void": false,
+    "Crystal": false,
+    "Mithril": false,
+    "Adamantine": false
+  },
+  "cards": [
+    [
+      "c",
+      {
+        "visible": true,
+        "x": 1289,
+        "y": 137,
+        "shrimp": {
+          "id": "c",
+          "species": "Wild",
+          "generation": 1
+        }
+      }
+    ],
+    [
+      "6d848de6-e98d-40af-bfd9-d14369637d9f",
+      {
+        "visible": true,
+        "x": 1183,
+        "y": 63,
+        "shrimp": {
+          "id": "6d848de6-e98d-40af-bfd9-d14369637d9f",
+          "species": "Wild",
+          "generation": 3
+        }
+      }
+    ],
+    [
+      "3d6c17af-fc4c-405f-85ce-33346ea90576",
+      {
+        "visible": true,
+        "x": 1088,
+        "y": 8,
+        "shrimp": {
+          "id": "3d6c17af-fc4c-405f-85ce-33346ea90576",
+          "species": "Wild",
+          "generation": 3
+        }
+      }
+    ],
+    [
+      "e8c9ffa9-905e-4a12-bfe8-3387681c59c6",
+      {
+        "visible": true,
+        "x": 1111,
+        "y": 12,
+        "shrimp": {
+          "id": "e8c9ffa9-905e-4a12-bfe8-3387681c59c6",
+          "species": "Wild",
+          "generation": 4
+        }
+      }
+    ],
+    [
+      "ffac5c12-a083-4595-aa8f-99f7f78f9d94",
+      {
+        "visible": true,
+        "x": 1005,
+        "y": 60,
+        "shrimp": {
+          "id": "ffac5c12-a083-4595-aa8f-99f7f78f9d94",
+          "species": "Cherry",
+          "generation": 5
+        }
+      }
+    ],
+    [
+      "0cd76f5c-bf9d-47f5-9ede-eee620968aac",
+      {
+        "visible": false,
+        "x": 0,
+        "y": 0,
+        "shrimp": {
+          "id": "0cd76f5c-bf9d-47f5-9ede-eee620968aac",
+          "species": "Wild",
+          "generation": 5
+        }
+      }
+    ],
+    [
+      "42409023-db47-4778-86c9-f6e59a359335",
+      {
+        "visible": false,
+        "x": 0,
+        "y": 0,
+        "shrimp": {
+          "id": "42409023-db47-4778-86c9-f6e59a359335",
+          "species": "Wild",
+          "generation": 5
+        }
+      }
+    ]
+  ]
+}
