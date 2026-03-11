@@ -12,6 +12,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveGame: (saveName : string, saveData : object) => ipcRenderer.invoke('save-game', saveName, saveData),
   loadGame: (saveName : string) => ipcRenderer.invoke('load-game', saveName),
 
+  // Show a file in the system file manager
+  showItemInFolder: (filePath: string) => ipcRenderer.send('show-item-in-folder', filePath),
+
+  // Open a folder picker dialog
+  selectFolder: () => ipcRenderer.invoke('select-folder') as Promise<string | null>,
+
   // Window controls for custom titlebar
   windowMinimize: () => ipcRenderer.send('window-minimize'),
   windowMaximize: () => ipcRenderer.send('window-maximize'),

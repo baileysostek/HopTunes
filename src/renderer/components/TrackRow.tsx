@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Typography } from '@mui/material';
 import { Song } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
+import { useContextMenuStore } from './SongContextMenu';
 
 interface TrackRowProps {
   track: Song;
@@ -18,11 +19,18 @@ function formatDuration(seconds: number | null): string {
 
 const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
   const currentTrack = usePlayerStore(s => s.currentTrack);
+  const showContextMenu = useContextMenuStore(s => s.show);
   const isActive = currentTrack?.path === track.path;
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    showContextMenu(track, e.clientX, e.clientY);
+  };
 
   return (
     <Box
       onClick={onPlay}
+      onContextMenu={handleContextMenu}
       sx={{
         display: 'flex',
         alignItems: 'center',
@@ -58,6 +66,14 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
         whiteSpace: 'nowrap',
       }}>
         {track.title}
+      </Typography>
+      <Typography sx={{
+        fontSize: 11,
+        ml: 2,
+        color: 'rgba(255,255,255,0.25)',
+        fontFamily: 'monospace',
+      }}>
+        {track.hash?.slice(0, 8)}
       </Typography>
       <Typography sx={{
         fontSize: 13,

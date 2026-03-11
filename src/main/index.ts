@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, session } from 'electron';
 import { setupIpcHandlers } from './api';
-import { initDatabase, getAllSongs } from './database';
+import { initDatabase, getAllSongs, getMediaLocations, addMediaLocation } from './database';
 import { indexLibrary } from './indexer';
 import { getPlaybackState, onStateChange, removeDevice as removePlaybackDevice, broadcastState, registerDevice as registerPlaybackDevice, heartbeatDevice } from './playback';
 import { isLocalAddress, validateDeviceToken, touchDevice, flushDeviceRegistry } from './auth';
@@ -110,7 +110,12 @@ const createWindow = async (): Promise<void> => {
   });
 
   await initDatabase();
-  indexLibrary(MUSIC_DIR);
+  // Seed the default music directory if no locations are configured yet
+  const locations = await getMediaLocations();
+  if (locations.length === 0) {
+    await addMediaLocation(MUSIC_DIR);
+  }
+  getMediaLocations().then(dirs => indexLibrary(dirs));
 
   // --- Express + WebSocket server ---
 

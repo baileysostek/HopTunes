@@ -14,6 +14,8 @@ export interface SongRow {
   has_art: number;
   track_number: number;
   file_modified_at: number;
+  hash: string;
+  hidden: number; // SQLite stores booleans as 0/1
 }
 
 function run(sql: string, params: unknown[] = []): Promise<void> {
@@ -21,6 +23,15 @@ function run(sql: string, params: unknown[] = []): Promise<void> {
     db!.run(sql, params, (err) => {
       if (err) reject(err);
       else resolve();
+    });
+  });
+}
+
+function runWithChanges(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
+  return new Promise((resolve, reject) => {
+    db!.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve({ changes: this.changes });
     });
   });
 }
@@ -54,16 +65,14 @@ export async function initDatabase(): Promise<void> {
             album TEXT NOT NULL,
             duration REAL,
             has_art INTEGER NOT NULL DEFAULT 0,
-            file_modified_at INTEGER NOT NULL
+            file_modified_at INTEGER NOT NULL,
+            track_number INTEGER DEFAULT 0,
+            hash TEXT NOT NULL DEFAULT '',
+            hidden INTEGER NOT NULL DEFAULT 0
           )
         `);
         await run(`CREATE INDEX IF NOT EXISTS idx_songs_file_path ON songs(file_path)`);
-        // Migration: add track_number column if it doesn't exist
-        try {
-          await run(`ALTER TABLE songs ADD COLUMN track_number INTEGER DEFAULT 0`);
-        } catch {
-          // Column already exists
-        }
+        await run(`CREATE INDEX IF NOT EXISTS idx_songs_hash ON songs(hash)`);
         await run(`
           CREATE TABLE IF NOT EXISTS artist_images (
             artist TEXT PRIMARY KEY NOT NULL,
@@ -79,6 +88,12 @@ export async function initDatabase(): Promise<void> {
             PRIMARY KEY (artist, album)
           )
         `);
+        await run(`
+          CREATE TABLE IF NOT EXISTS media_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT UNIQUE NOT NULL
+          )
+        `);
         resolve();
       } catch (e) {
         reject(e);
@@ -87,10 +102,10 @@ export async function initDatabase(): Promise<void> {
   });
 }
 
-export async function upsertSong(song: Omit<SongRow, 'id'>): Promise<void> {
+export async function upsertSong(song: Omit<SongRow, 'id' | 'hidden'>): Promise<void> {
   await run(
-    `INSERT INTO songs (file_path, title, artist, album, duration, has_art, file_modified_at, track_number)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO songs (file_path, title, artist, album, duration, has_art, file_modified_at, track_number, hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(file_path) DO UPDATE SET
        title = excluded.title,
        artist = excluded.artist,
@@ -98,13 +113,50 @@ export async function upsertSong(song: Omit<SongRow, 'id'>): Promise<void> {
        duration = excluded.duration,
        has_art = excluded.has_art,
        file_modified_at = excluded.file_modified_at,
-       track_number = excluded.track_number`,
-    [song.file_path, song.title, song.artist, song.album, song.duration, song.has_art, song.file_modified_at, song.track_number]
+       track_number = excluded.track_number,
+       hash = excluded.hash`,
+    [song.file_path, song.title, song.artist, song.album, song.duration, song.has_art, song.file_modified_at, song.track_number, song.hash]
   );
 }
 
-export async function getAllSongs(): Promise<SongRow[]> {
-  return all<SongRow>('SELECT * FROM songs ORDER BY artist, album, track_number, title');
+export async function getAllSongs(includeHidden = false): Promise<SongRow[]> {
+  const where = includeHidden ? '' : 'WHERE hidden = 0';
+  return all<SongRow>(`SELECT * FROM songs ${where} ORDER BY artist, album, track_number, title`);
+}
+
+/**
+ * For each group of songs sharing the same hash, keep the one with the
+ * lowest id visible and mark the rest as hidden.  Songs with an empty
+ * hash are never hidden (we can't determine duplicates without a hash).
+ */
+export async function markDuplicatesHidden(): Promise<number> {
+  // First, reset all songs to visible
+  await run('UPDATE songs SET hidden = 0');
+  // Then hide duplicates: any song whose hash is non-empty and whose id
+  // is NOT the minimum id for that hash
+  const result = await runWithChanges(
+    `UPDATE songs SET hidden = 1
+     WHERE hash != ''
+       AND id NOT IN (
+         SELECT MIN(id) FROM songs WHERE hash != '' GROUP BY hash
+       )`
+  );
+  return result.changes;
+}
+
+export async function hideSongByPath(filePath: string): Promise<void> {
+  await run('UPDATE songs SET hidden = 1 WHERE file_path = ?', [filePath]);
+}
+
+export async function setSongHidden(filePath: string, hidden: boolean): Promise<void> {
+  await run('UPDATE songs SET hidden = ? WHERE file_path = ?', [hidden ? 1 : 0, filePath]);
+}
+
+export async function getAlbumSongs(artist: string, album: string): Promise<SongRow[]> {
+  return all<SongRow>(
+    'SELECT * FROM songs WHERE artist = ? AND album = ? ORDER BY track_number, title',
+    [artist, album]
+  );
 }
 
 export async function getSongModifiedAt(filePath: string): Promise<number | null> {
@@ -154,6 +206,30 @@ export async function cacheAlbumArt(artist: string, album: string, thumbUrl: str
      ON CONFLICT(artist, album) DO UPDATE SET thumb_url = excluded.thumb_url`,
     [artist, album, thumbUrl]
   );
+}
+
+// --- Media locations ---
+
+export async function getMediaLocations(): Promise<string[]> {
+  const rows = await all<{ path: string }>('SELECT path FROM media_locations ORDER BY id');
+  return rows.map(r => r.path);
+}
+
+export async function addMediaLocation(locationPath: string): Promise<void> {
+  await run(
+    'INSERT OR IGNORE INTO media_locations (path) VALUES (?)',
+    [locationPath]
+  );
+}
+
+export async function removeMediaLocation(locationPath: string): Promise<void> {
+  await run('DELETE FROM media_locations WHERE path = ?', [locationPath]);
+  // Remove all songs whose file path falls under the removed directory
+  const prefix = locationPath.endsWith('/') || locationPath.endsWith('\\') ? locationPath : locationPath + path.sep;
+  await run('DELETE FROM songs WHERE file_path LIKE ? ESCAPE ?', [
+    prefix.replace(/[%_\\]/g, '\\$&') + '%',
+    '\\',
+  ]);
 }
 
 export async function removeDeletedSongs(existingPaths: Set<string>): Promise<number> {

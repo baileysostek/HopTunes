@@ -21,8 +21,8 @@ public class MainActivity extends BridgeActivity {
             }
         });
 
-        // Start the foreground service to keep the app alive with the screen off
-        Intent serviceIntent = new Intent(this, KeepAliveService.class);
+        // Start the media browser service (also serves as foreground keep-alive)
+        Intent serviceIntent = new Intent(this, OpenTunesMediaService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent);
         } else {
@@ -32,8 +32,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onDestroy() {
-        // Stop the keep-alive service when the app is closed
-        Intent serviceIntent = new Intent(this, KeepAliveService.class);
+        // Stop the media service when the app is closed
+        Intent serviceIntent = new Intent(this, OpenTunesMediaService.class);
         stopService(serviceIntent);
         super.onDestroy();
     }

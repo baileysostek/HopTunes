@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, IconButton } from '@mui/material';
 import { isElectron } from '../utils/platform';
+import { usePlayerStore } from '../store/playerStore';
 
 const TitleBar: React.FC = () => {
+  const queueVisible = usePlayerStore(s => s.queueVisible);
   const [maximized, setMaximized] = useState(false);
 
   const checkMaximized = useCallback(async () => {
@@ -30,7 +32,6 @@ const TitleBar: React.FC = () => {
   const buttonSx = {
     borderRadius: 0,
     width: 46,
-    height: 32,
     color: 'rgba(255,255,255,0.8)',
     WebkitAppRegion: 'no-drag',
     '&:hover': {
@@ -46,7 +47,10 @@ const TitleBar: React.FC = () => {
           position: 'fixed',
           top: 0,
           right: 0,
+          height: queueVisible ? 32 : 62,
+          transition: 'height 0.3s ease',
           display: 'flex',
+          alignItems: 'stretch',
           zIndex: 9999,
           WebkitAppRegion: 'no-drag',
           '& *': { WebkitAppRegion: 'no-drag' },

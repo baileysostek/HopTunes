@@ -1,0 +1,53 @@
+Android Auto Integration -- Investigation Results
+Your Current App
+OpenTunes is a Capacitor + React hybrid app (package com.opentunes.app). The Android side is minimal -- just a MainActivity extending Capacitor's BridgeActivity with WebView camera permissions. There are no native Android services, no media player components, and no background audio handling yet.
+
+Can It Integrate with Android Auto? Yes, but it requires native code.
+This is the key finding: Android Auto does NOT render your app's UI. It connects to a native MediaBrowserService on your device and renders its own car-safe interface. This means:
+
+The media service MUST be native Java/Kotlin -- no WebView involvement on the car screen at all
+Your Capacitor project structure supports this -- you can add native Java classes alongside the existing WebView layer under android/app/src/main/java/com/opentunes/app/
+Your minSdkVersion of 24 is sufficient (Android Auto requires 21+)
+What You'd Need to Build
+Native Java/Kotlin components:
+
+Component	Purpose
+MediaBrowserServiceCompat	Exposes your music library as a browsable tree to Android Auto
+MediaSessionCompat	Manages playback state, transport controls, and now-playing metadata
+Audio playback engine	Native MediaPlayer or ExoPlayer to actually play audio
+Foreground service	Keeps playback alive when the app isn't in the foreground
+Manifest additions:
+
+A <service> declaration for your MediaBrowserService with the android.media.browse.MediaBrowserService intent filter
+A <meta-data> tag pointing to an automotive_app_desc.xml resource
+The new XML resource file declaring <uses name="media"/>
+Content tree structure (max 4 root tabs):
+
+
+Root
+  ├── Playlists   [browsable]
+  ├── Artists     [browsable]
+  ├── Albums      [browsable]
+  └── Songs       [browsable]
+        ├── Song A  [playable]
+        ├── Song B  [playable]
+        └── ...
+Architecture for Your Use Case
+Since you plan to have a local library of songs on-device, the architecture is straightforward:
+
+Keep Capacitor/WebView for the phone UI (your existing React app)
+Add a native MediaBrowserService that reads from the local library (SQLite DB or filesystem scan)
+Add a native audio player (ExoPlayer recommended) managed by the service
+Bridge between layers using a custom Capacitor plugin so both the phone UI and the car UI control the same playback engine
+Google Play Requirements
+Android Auto apps undergo additional manual review beyond standard Play Store review. Key requirements:
+
+Must support Google Assistant voice commands
+Must not autoplay on startup
+Buttons must respond within 2 seconds, app must launch within 10 seconds
+Icons must be monochrome (system applies tinting)
+No animated elements or text ads
+Bottom Line
+This is very achievable. The native service layer is well-documented and the pattern of "Capacitor app + native Android service" is established. The main work is writing the MediaBrowserService, MediaSession, and audio playback logic in Java/Kotlin -- roughly 3-4 new Java files. Your existing project structure doesn't need to change; you'd just add native classes alongside MainActivity.java.
+
+Want me to plan out the implementation or start building the native media service?

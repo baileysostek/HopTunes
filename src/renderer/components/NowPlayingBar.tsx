@@ -11,16 +11,23 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-const PlayIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-    <polygon points="3,1 13,8 3,15" />
-  </svg>
-);
+// Two-path morph: each shape is split into a left and right quad
+// so the path commands match (M L L L Z) for smooth CSS d transitions.
+const PAUSE_LEFT  = 'M2,1 L6,1 L6,15 L2,15 Z';
+const PAUSE_RIGHT = 'M10,1 L14,1 L14,15 L10,15 Z';
+const PLAY_LEFT   = 'M3,1 L8,4.5 L8,11.5 L3,15 Z';
+const PLAY_RIGHT  = 'M8,4.5 L13,8 L13,8 L8,11.5 Z';
 
-const PauseIcon = () => (
+const PlayPauseIcon: React.FC<{ isPlaying: boolean }> = ({ isPlaying }) => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-    <rect x="2" y="1" width="4" height="14" />
-    <rect x="10" y="1" width="4" height="14" />
+    <path
+      d={isPlaying ? PAUSE_LEFT : PLAY_LEFT}
+      style={{ transition: 'd 0.25s cubic-bezier(0.4, 0, 0.2, 1)' }}
+    />
+    <path
+      d={isPlaying ? PAUSE_RIGHT : PLAY_RIGHT}
+      style={{ transition: 'd 0.25s cubic-bezier(0.4, 0, 0.2, 1)' }}
+    />
   </svg>
 );
 
@@ -212,7 +219,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               '&:hover': { transform: 'scale(1.06)' },
             }}
           >
-            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+            <PlayPauseIcon isPlaying={isPlaying} />
           </Box>
           <Box
             onClick={next}

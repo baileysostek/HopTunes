@@ -5,6 +5,7 @@ import {
   regeneratePairingSecret,
   isLocalAddress,
   pairDevice,
+  getLastPairing,
   getRegisteredDevices,
   revokeDevice,
   revokeAllDevices,
@@ -103,6 +104,18 @@ export function createConnectRouter(deps: ConnectRouterDeps): Router {
       return;
     }
     res.json({ token: result.token });
+  });
+
+  // GET /api/connect/last-pairing — poll for a recent pairing event (localhost only)
+  router.get('/last-pairing', (req, res) => {
+    if (localhostOnly(req, res)) return;
+    const since = parseInt(req.query.since as string, 10);
+    if (isNaN(since)) {
+      res.status(400).json({ error: 'since parameter required' });
+      return;
+    }
+    const event = getLastPairing(since);
+    res.json(event);
   });
 
   // POST /api/connect/regenerate — regenerate pairing secret (localhost only)

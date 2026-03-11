@@ -8,14 +8,57 @@ import { useLibraryStore } from './libraryStore';
 // Re-export so components can import from the store
 export type { DeviceInfo };
 
-let audio: HTMLAudioElement | null = null;
+// Dual audio element pool for gapless playback.
+// One plays the current track while the other pre-buffers the next.
+let audioElements: [HTMLAudioElement, HTMLAudioElement] | null = null;
+let activeIndex = 0;
+let preloadedTrackPath: string | null = null; // path loaded in the preload element
+let gaplessTrackPath: string | null = null;   // set during gapless swap, cleared on server confirm
+
+function initAudioPool(): [HTMLAudioElement, HTMLAudioElement] {
+  if (!audioElements) {
+    const a = new Audio();
+    const b = new Audio();
+    a.volume = 0.7;
+    b.volume = 0.7;
+    a.preload = 'auto';
+    b.preload = 'auto';
+    audioElements = [a, b];
+  }
+  return audioElements;
+}
 
 function getAudio(): HTMLAudioElement {
-  if (!audio) {
-    audio = new Audio();
-    audio.volume = 0.7;
+  return initAudioPool()[activeIndex];
+}
+
+function getPreloadAudio(): HTMLAudioElement {
+  return initAudioPool()[1 - activeIndex];
+}
+
+function prebufferNextTrack(queue: Song[]): void {
+  const nextSong = queue[0];
+  const preload = getPreloadAudio();
+
+  if (!nextSong) {
+    preload.src = '';
+    preloadedTrackPath = null;
+    return;
   }
-  return audio;
+
+  if (preloadedTrackPath === nextSong.path) return; // already preloading correct track
+
+  preload.src = getMediaUrl(nextSong.path);
+  preload.currentTime = 0;
+  preloadedTrackPath = nextSong.path;
+}
+
+function cleanupAllAudio(): void {
+  const [a, b] = initAudioPool();
+  a.pause(); a.src = '';
+  b.pause(); b.src = '';
+  preloadedTrackPath = null;
+  gaplessTrackPath = null;
 }
 
 // Generate a stable device ID stored in localStorage
@@ -56,6 +99,7 @@ interface PlayerState {
   devices: DeviceInfo[];
   thisDeviceId: string;
   play: (song: Song, queue?: Song[]) => void;
+  addToQueue: (song: Song) => void;
   pause: () => void;
   resume: () => void;
   togglePlay: () => void;
@@ -114,8 +158,13 @@ function applyServerState(
 
   if (shouldPlayAudio) {
     // This device is the active player — manage audio
-    if (newTrack?.path !== local.currentTrack?.path || (justBecameActive && newTrack)) {
+    if (gaplessTrackPath && newTrack?.path === gaplessTrackPath) {
+      // Track already playing via gapless transition — skip reload
+      gaplessTrackPath = null;
+      prebufferNextTrack(server.queue);
+    } else if (newTrack?.path !== local.currentTrack?.path || (justBecameActive && newTrack)) {
       // Track changed OR device just became active — (re)load audio
+      gaplessTrackPath = null;
       if (newTrack) {
         a.src = getMediaUrl(newTrack.path);
         a.currentTime = server.estimatedPosition;
@@ -124,9 +173,13 @@ function applyServerState(
         a.pause();
         a.src = '';
       }
+      prebufferNextTrack(server.queue);
     } else if (local.isPlaying !== isNowPlaying) {
       if (isNowPlaying) a.play().catch(() => {});
       else a.pause();
+    } else {
+      // Same track, same play state — queue may have changed, update preload
+      prebufferNextTrack(server.queue);
     }
 
     // Sync position if significantly off (skip if we just loaded)
@@ -137,6 +190,9 @@ function applyServerState(
     // Not the active player — stop any local audio
     if (!a.paused) a.pause();
     a.src = '';
+    getPreloadAudio().src = '';
+    preloadedTrackPath = null;
+    gaplessTrackPath = null;
 
     // Store the server's position anchor for local interpolation
     serverPositionAnchor = server.estimatedPosition;
@@ -196,6 +252,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       applyServerState(response.data, set, get);
     } catch (err) {
       console.error('Failed to play:', err);
+    }
+  },
+
+  addToQueue: async (song) => {
+    try {
+      const response = await axios.post(`${getApiBase()}/api/playback/queue`, { song });
+      applyServerState(response.data, set, get);
+    } catch (err) {
+      console.error('Failed to add to queue:', err);
     }
   },
 
@@ -267,7 +332,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setVolume: (vol) => {
-    getAudio().volume = vol;
+    const [a, b] = initAudioPool();
+    a.volume = vol;
+    b.volume = vol;
     set({ volume: vol });
   },
 
@@ -314,33 +381,59 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
 // Wire up local audio events + server polling + device registration
 if (typeof window !== 'undefined') {
-  const a = getAudio();
+  const [audioA, audioB] = initAudioPool();
 
-  a.addEventListener('timeupdate', () => {
-    // Only the active device should drive time/duration from the audio element.
-    // Non-active devices have a.src = '' so a.duration is NaN and a.currentTime is 0,
-    // which would overwrite the correct interpolated values.
+  function handleTimeUpdate(this: HTMLAudioElement) {
+    if (this !== getAudio()) return; // ignore events from the preload element
     if (!isThisDeviceActive(usePlayerStore.getState())) return;
-    // Skip if metadata hasn't loaded yet (duration is NaN) to avoid clobbering
-    // the server-provided duration with 0
-    if (!a.duration || isNaN(a.duration)) return;
+    if (!this.duration || isNaN(this.duration)) return;
     usePlayerStore.setState({
-      currentTime: a.currentTime,
-      duration: a.duration,
+      currentTime: this.currentTime,
+      duration: this.duration,
     });
-  });
+  }
 
-  a.addEventListener('ended', () => {
-    // Only the active device should advance the queue
-    if (isThisDeviceActive(usePlayerStore.getState())) {
-      usePlayerStore.getState().next();
-    }
-  });
-
-  a.addEventListener('loadedmetadata', () => {
+  function handleEnded(this: HTMLAudioElement) {
+    if (this !== getAudio()) return;
     if (!isThisDeviceActive(usePlayerStore.getState())) return;
-    usePlayerStore.setState({ duration: a.duration });
-  });
+
+    const state = usePlayerStore.getState();
+    const nextSong = state.queue[0];
+    const preload = getPreloadAudio();
+
+    if (preloadedTrackPath && preload.src && nextSong?.path === preloadedTrackPath) {
+      // Gapless transition: swap to pre-buffered element and play immediately
+      activeIndex = 1 - activeIndex;
+      gaplessTrackPath = preloadedTrackPath;
+      preloadedTrackPath = null;
+      getAudio().play().catch(() => {});
+
+      // Update UI immediately without waiting for server round-trip
+      usePlayerStore.setState({
+        currentTrack: nextSong,
+        currentTime: 0,
+        duration: nextSong.duration || 0,
+      });
+
+      // Clear the old element (now the preload slot)
+      getPreloadAudio().src = '';
+    }
+
+    // Notify server to advance the queue
+    state.next();
+  }
+
+  function handleLoadedMetadata(this: HTMLAudioElement) {
+    if (this !== getAudio()) return;
+    if (!isThisDeviceActive(usePlayerStore.getState())) return;
+    usePlayerStore.setState({ duration: this.duration });
+  }
+
+  for (const el of [audioA, audioB]) {
+    el.addEventListener('timeupdate', handleTimeUpdate);
+    el.addEventListener('ended', handleEnded);
+    el.addEventListener('loadedmetadata', handleLoadedMetadata);
+  }
 
   // Register this device with the server, retrying until successful.
   // The response includes the full state (devices list, playback, etc.)
@@ -444,9 +537,19 @@ if (typeof window !== 'undefined') {
               usePlayerStore.getState
             );
             break;
-          case 'library':
+          case 'library': {
             useLibraryStore.setState({ songs: msg.data, loading: false });
+            const { useReindexStore } = await import('../components/ReindexOverlay');
+            if (useReindexStore.getState().active) {
+              useReindexStore.getState().stop();
+            }
             break;
+          }
+          case 'reindex-progress': {
+            const { useReindexStore } = await import('../components/ReindexOverlay');
+            useReindexStore.getState().setFound(msg.found);
+            break;
+          }
         }
       } catch {
         // Ignore malformed messages
@@ -476,9 +579,7 @@ if (typeof window !== 'undefined') {
           currentTime: 0,
           duration: 0,
         });
-        const a = getAudio();
-        a.pause();
-        a.src = '';
+        cleanupAllAudio();
         return;
       }
 
@@ -497,9 +598,7 @@ if (typeof window !== 'undefined') {
         duration: 0,
       });
       useLibraryStore.setState({ songs: [], loading: false });
-      const a = getAudio();
-      a.pause();
-      a.src = '';
+      cleanupAllAudio();
 
       // Reset interpolation anchors so the position doesn't keep ticking
       serverPositionAnchor = 0;
@@ -526,7 +625,7 @@ if (typeof window !== 'undefined') {
           devices: [], activeDeviceId: null, currentTime: 0, duration: 0,
         });
         useLibraryStore.setState({ songs: [], loading: false });
-        const ea = getAudio(); ea.pause(); ea.src = '';
+        cleanupAllAudio();
         serverPositionAnchor = 0;
         serverPositionTimestamp = 0;
         serverIsPlaying = false;
@@ -549,27 +648,28 @@ if (typeof window !== 'undefined') {
   // Initial sync on load
   usePlayerStore.getState().syncFromServer();
 
-  // Explicitly close the WebSocket when the app is shutting down so the
+  // Explicitly close the WebSocket when the app is actually closing so the
   // server detects the disconnect instantly (sends a proper close frame)
   // instead of waiting for the ping/pong timeout.
-  function cleanupOnShutdown() {
+  // NOTE: We intentionally only use 'beforeunload' here — NOT 'pagehide' or
+  // 'visibilitychange'.  On mobile (Capacitor/Android), pagehide and
+  // visibilitychange fire whenever the app is backgrounded or the screen
+  // turns off.  Closing the WS in those cases causes the server to remove
+  // the device and switch playback to the host, which is wrong — the user
+  // just locked their phone.  If the app is truly killed or the phone dies,
+  // the server's ping/pong liveness check will detect the dead connection.
+  window.addEventListener('beforeunload', () => {
     if (activeWs && activeWs.readyState === WebSocket.OPEN) {
       revoked = true; // prevent reconnection attempts
       activeWs.close(1000, 'app closing');
     }
-  }
-  window.addEventListener('beforeunload', cleanupOnShutdown);
-  window.addEventListener('pagehide', cleanupOnShutdown);
+  });
 
-  // Use visibilitychange to handle mobile app backgrounding/foregrounding.
-  // On Android WebViews (Capacitor), this fires when the app is backgrounded
-  // or brought back to the foreground — no native plugin needed.
+  // When the app comes back to the foreground, re-establish the WebSocket
+  // if it was dropped while backgrounded (e.g. OS killed the socket).
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      cleanupOnShutdown();
-    } else if (document.visibilityState === 'visible') {
-      // Re-establish connection when the app comes back to foreground
-      if (revoked || !activeWs || activeWs.readyState !== WebSocket.OPEN) {
+    if (document.visibilityState === 'visible') {
+      if (!activeWs || activeWs.readyState !== WebSocket.OPEN) {
         revoked = false;
         connectWebSocket();
       }

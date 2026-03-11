@@ -4,6 +4,7 @@ import TrackRow from './TrackRow';
 import { Song, getMediaUrl } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
 import { useAlbumImage } from '../hooks/useAlbumImage';
+import { useAlbumContextMenuStore } from './AlbumContextMenu';
 
 interface AlbumSectionProps {
   albumName: string;
@@ -24,6 +25,7 @@ function formatTotalDuration(songs: Song[]): string {
 
 const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, artistName }) => {
   const play = usePlayerStore(s => s.play);
+  const showAlbumMenu = useAlbumContextMenuStore(s => s.show);
   const externalArt = useAlbumImage(artUrl ? '' : artistName, artUrl ? '' : albumName);
 
   const sortedTracks = [...tracks].sort((a, b) => {
@@ -31,18 +33,26 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
     return a.title.localeCompare(b.title);
   });
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    showAlbumMenu(artistName, albumName, e.clientX, e.clientY);
+  };
+
   return (
-    <Box sx={{
-      display: 'flex',
-      mb: 2,
-      bgcolor: 'rgba(255,255,255,0.03)',
-      borderRadius: 2,
-      overflow: 'hidden',
-      transition: 'background 0.2s',
-      '&:hover': {
-        bgcolor: 'rgba(255,255,255,0.05)',
-      },
-    }}>
+    <Box
+      onContextMenu={handleContextMenu}
+      sx={{
+        display: 'flex',
+        mb: 2,
+        bgcolor: 'rgba(255,255,255,0.03)',
+        borderRadius: 2,
+        overflow: 'hidden',
+        transition: 'background 0.2s',
+        '&:hover': {
+          bgcolor: 'rgba(255,255,255,0.05)',
+        },
+      }}
+    >
       {/* Album Art */}
       <Box sx={{
         width: 160,

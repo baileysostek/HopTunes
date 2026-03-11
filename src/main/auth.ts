@@ -116,6 +116,15 @@ export function flushDeviceRegistry(): void {
 // Load on startup
 loadDeviceRegistry();
 
+/** Last successful pairing event (for the ConnectModal to poll). */
+let lastPairingEvent: { device: { name: string; type: string }; timestamp: number } | null = null;
+
+/** Returns the last pairing event if it occurred after `since`, otherwise null. */
+export function getLastPairing(since: number): { device: { name: string; type: string }; timestamp: number } | null {
+  if (lastPairingEvent && lastPairingEvent.timestamp >= since) return lastPairingEvent;
+  return null;
+}
+
 /** Pair a new device: validate the pairing secret, generate a unique token, persist. */
 export function pairDevice(
   secret: string,
@@ -146,6 +155,9 @@ export function pairDevice(
   deviceRegistry.set(deviceId, device);
   tokenIndex.set(token, device);
   saveDeviceRegistry();
+
+  lastPairingEvent = { device: { name, type }, timestamp: now };
+
   return { token };
 }
 

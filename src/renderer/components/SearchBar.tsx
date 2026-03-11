@@ -57,7 +57,7 @@ const SearchBar: React.FC = () => {
         }}
       />
       {/* Spacer for window controls — no-drag so buttons remain clickable */}
-      <Box sx={{ width: 150, minWidth: 150, WebkitAppRegion: 'no-drag' }} />
+      <Box sx={{ width: 150, minWidth: 150, alignSelf: 'stretch', WebkitAppRegion: 'no-drag' }} />
     </Box>
   );
 };

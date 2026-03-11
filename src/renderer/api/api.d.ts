@@ -11,6 +11,8 @@ declare global {
       capturePage: () => Promise<string | null>;
       saveGame: (saveName: string, saveData: object) => Promise<void>;
       loadGame: (saveName: string) => Promise<object>;
+      showItemInFolder: (filePath: string) => void;
+      selectFolder: () => Promise<string | null>;
       windowMinimize: () => void;
       windowMaximize: () => void;
       windowClose: () => void;

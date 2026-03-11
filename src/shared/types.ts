@@ -1,6 +1,9 @@
 // Shared types used by both the main (host) process and renderer (edge) clients.
 // Single source of truth — avoids duplicate definitions drifting out of sync.
 
+/** URL prefix used for audio streaming endpoints. */
+export const AUDIO_PATH_PREFIX = '/api/audio/';
+
 export interface Song {
   title: string;
   artist: string;
@@ -9,6 +12,8 @@ export interface Song {
   trackNumber: number;
   path: string;
   art: string | null;
+  hash: string;
+  hidden: boolean;
 }
 
 export type DeviceType = 'desktop' | 'mobile' | 'web';
@@ -40,7 +45,8 @@ export interface ServerPlaybackState extends PlaybackState {
 export type ServerWsMessage =
   | { type: 'welcome'; state: ServerPlaybackState; library: Song[] }
   | { type: 'state'; data: ServerPlaybackState }
-  | { type: 'library'; data: Song[] };
+  | { type: 'library'; data: Song[] }
+  | { type: 'reindex-progress'; found: number };
 
 export type ClientWsMessage =
   | { type: 'ping' }

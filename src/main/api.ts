@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, IpcMainEvent } from 'electron';
+import { ipcMain, BrowserWindow, IpcMainEvent, shell, dialog } from 'electron';
 import fs from "fs";
 
 /**
@@ -42,6 +42,20 @@ export const setupIpcHandlers = (window: BrowserWindow): void => {
   });
   ipcMain.on('window-close', () => window?.close());
   ipcMain.handle('window-is-maximized', () => window?.isMaximized() ?? false);
+
+  ipcMain.on('show-item-in-folder', (_event: IpcMainEvent, filePath: string) => {
+    console.log('[OpenTunes] showItemInFolder called with path:', filePath);
+    shell.showItemInFolder(filePath);
+  });
+
+  ipcMain.handle('select-folder', async () => {
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openDirectory'],
+      title: 'Select Music Folder',
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
 
   ipcMain.handle('save-game', async (event : IpcMainEvent, saveName : string, saveData : object) => {
     fs.writeFileSync(`./${saveName}.json`, JSON.stringify(saveData, null, 2))

@@ -18,9 +18,10 @@ const ConnectIcon = () => (
 
 interface SidebarProps {
   onConnectClick?: () => void;
+  onSettingsClick?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ onConnectClick }) => {
+const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) => {
   const songs = useLibraryStore(s => s.songs);
   const selectedArtist = useLibraryStore(s => s.selectedArtist);
   const setSelectedArtist = useLibraryStore(s => s.setSelectedArtist);
@@ -75,7 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick }) => {
           {/* All Artists option */}
           <ListItemButton
             selected={selectedArtist === null}
-            onClick={() => setSelectedArtist(null)}
+            onClick={() => { setSelectedArtist(null); navigate('/'); }}
             sx={{
               borderRadius: 1,
               mb: 0.25,
@@ -118,7 +119,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick }) => {
             <ListItemButton
               key={artist}
               selected={selectedArtist === artist}
-              onClick={() => setSelectedArtist(artist)}
+              onClick={() => { setSelectedArtist(artist); navigate('/'); }}
               sx={{
                 borderRadius: 1,
                 mb: 0.25,
@@ -193,13 +194,14 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick }) => {
             </Box>
           )}
           <Box
-            onClick={() => navigate('/settings')}
+            onClick={onSettingsClick}
             sx={{
               cursor: 'pointer',
               color: 'rgba(255,255,255,0.3)',
               '&:hover': { color: 'rgba(255,255,255,0.7)' },
               display: 'flex',
               alignItems: 'center',
+              transition: 'color 0.15s',
             }}
           >
             <SettingsIcon />

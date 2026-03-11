@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { parseFile } from 'music-metadata';
-import { Song, ServerWsMessage } from '../../shared/types';
+import { Song, ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
 import { SongRow } from '../database';
-import { getAllSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt } from '../database';
+import { getAllSongs, hideSongByPath, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation } from '../database';
 import { indexLibrary } from '../indexer';
 import { MUSIC_DIR } from '../config';
 
@@ -20,16 +20,29 @@ export function mapSongRows(rows: SongRow[]): Song[] {
     album: row.album,
     duration: row.duration,
     trackNumber: row.track_number || 0,
-    path: `/api/audio/${encodeURIComponent(row.file_path)}`,
+    path: `${AUDIO_PATH_PREFIX}${encodeURIComponent(row.file_path)}`,
     art: row.has_art ? `/api/art/${encodeURIComponent(row.file_path)}` : null,
+    hash: row.hash || '',
+    hidden: row.hidden === 1,
   }));
 }
 
-/** Validate that a resolved file path is within the music directory. */
-function isPathWithinMusicDir(filePath: string): boolean {
+/** Validate that a resolved file path is within any registered media location. */
+async function isPathWithinMediaLocations(filePath: string): Promise<boolean> {
   const resolved = path.resolve(filePath);
-  const musicDir = path.resolve(MUSIC_DIR);
-  return resolved.startsWith(musicDir + path.sep) || resolved === musicDir;
+  const locations = await getMediaLocations();
+  // Fall back to default MUSIC_DIR if no locations are configured
+  const dirs = locations.length > 0 ? locations : [MUSIC_DIR];
+  return dirs.some(dir => {
+    const resolvedDir = path.resolve(dir);
+    return resolved.startsWith(resolvedDir + path.sep) || resolved === resolvedDir;
+  });
+}
+
+/** Get the list of directories to index (media locations or default MUSIC_DIR). */
+async function getIndexDirs(): Promise<string[]> {
+  const locations = await getMediaLocations();
+  return locations.length > 0 ? locations : [MUSIC_DIR];
 }
 
 export function createLibraryRouter(deps: LibraryRouterDeps): Router {
@@ -46,16 +59,134 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
   });
 
+  // POST /api/library/hide — hide a song by its file path
+  router.post('/library/hide', async (req: Request, res: Response) => {
+    const { path: songPath } = req.body;
+    if (!songPath || typeof songPath !== 'string') {
+      res.status(400).json({ error: 'missing path' });
+      return;
+    }
+    try {
+      await hideSongByPath(songPath);
+      const rows = await getAllSongs();
+      const songs = mapSongRows(rows);
+      deps.broadcastToClients({ type: 'library', data: songs });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Failed to hide song:', err);
+      res.status(500).json({ error: 'Failed to hide song' });
+    }
+  });
+
+  // GET /api/library/album-songs — all songs (including hidden) for a given artist+album
+  router.get('/library/album-songs', async (req: Request, res: Response) => {
+    const artist = req.query.artist as string | undefined;
+    const album = req.query.album as string | undefined;
+    if (!artist || !album) {
+      res.status(400).json({ error: 'missing ?artist= and ?album= parameters' });
+      return;
+    }
+    try {
+      const rows = await getAlbumSongs(artist, album);
+      res.json(mapSongRows(rows));
+    } catch (err) {
+      console.error('Failed to get album songs:', err);
+      res.status(500).json({ error: 'Failed to get album songs' });
+    }
+  });
+
+  // POST /api/library/set-hidden — batch update hidden state for songs
+  router.post('/library/set-hidden', async (req: Request, res: Response) => {
+    const { songs } = req.body as { songs?: { path: string; hidden: boolean }[] };
+    if (!Array.isArray(songs)) {
+      res.status(400).json({ error: 'missing songs array' });
+      return;
+    }
+    try {
+      for (const { path: songPath, hidden } of songs) {
+        const diskPath = decodeURIComponent(songPath.replace(AUDIO_PATH_PREFIX, ''));
+        await setSongHidden(diskPath, hidden);
+      }
+      const rows = await getAllSongs();
+      const mapped = mapSongRows(rows);
+      deps.broadcastToClients({ type: 'library', data: mapped });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Failed to set hidden state:', err);
+      res.status(500).json({ error: 'Failed to update songs' });
+    }
+  });
+
   // POST /api/reindex — trigger a library re-index
   router.post('/reindex', async (_req: Request, res: Response) => {
     try {
-      await indexLibrary(MUSIC_DIR);
+      const dirs = await getIndexDirs();
+      await indexLibrary(dirs, (found) => {
+        deps.broadcastToClients({ type: 'reindex-progress', found });
+      });
       const rows = await getAllSongs();
       deps.broadcastToClients({ type: 'library', data: mapSongRows(rows) });
       res.json({ indexed: rows.length });
     } catch (err) {
       console.error('Failed to reindex:', err);
       res.status(500).json({ error: 'Failed to reindex' });
+    }
+  });
+
+  // GET /api/library/locations — list media locations
+  router.get('/library/locations', async (_req: Request, res: Response) => {
+    try {
+      const locations = await getMediaLocations();
+      res.json(locations);
+    } catch (err) {
+      console.error('Failed to get media locations:', err);
+      res.status(500).json({ error: 'Failed to get media locations' });
+    }
+  });
+
+  // POST /api/library/locations — add a media location, then reindex
+  router.post('/library/locations', async (req: Request, res: Response) => {
+    const { path: locationPath } = req.body;
+    if (!locationPath || typeof locationPath !== 'string') {
+      res.status(400).json({ error: 'missing path' });
+      return;
+    }
+    try {
+      await addMediaLocation(locationPath);
+      const dirs = await getIndexDirs();
+      // Reindex in background so the response is fast
+      indexLibrary(dirs, (found) => {
+        deps.broadcastToClients({ type: 'reindex-progress', found });
+      }).then(async () => {
+        const rows = await getAllSongs();
+        deps.broadcastToClients({ type: 'library', data: mapSongRows(rows) });
+      }).catch(err => console.error('Reindex after add failed:', err));
+      const locations = await getMediaLocations();
+      res.json(locations);
+    } catch (err) {
+      console.error('Failed to add media location:', err);
+      res.status(500).json({ error: 'Failed to add media location' });
+    }
+  });
+
+  // DELETE /api/library/locations — remove a media location, then reindex
+  router.delete('/library/locations', async (req: Request, res: Response) => {
+    const { path: locationPath } = req.body;
+    if (!locationPath || typeof locationPath !== 'string') {
+      res.status(400).json({ error: 'missing path' });
+      return;
+    }
+    try {
+      // removeMediaLocation also deletes songs under that directory
+      await removeMediaLocation(locationPath);
+      // Broadcast the updated library immediately
+      const rows = await getAllSongs();
+      deps.broadcastToClients({ type: 'library', data: mapSongRows(rows) });
+      const locations = await getMediaLocations();
+      res.json(locations);
+    } catch (err) {
+      console.error('Failed to remove media location:', err);
+      res.status(500).json({ error: 'Failed to remove media location' });
     }
   });
 
@@ -108,10 +239,10 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   });
 
   // GET /api/audio/:file — stream an audio file (with path traversal protection)
-  router.get('/audio/:file', (req: Request, res: Response) => {
+  router.get('/audio/:file', async (req: Request, res: Response) => {
     const filePath = decodeURIComponent(req.params.file);
 
-    if (!isPathWithinMusicDir(filePath)) {
+    if (!await isPathWithinMediaLocations(filePath)) {
       res.status(403).json({ error: 'access denied' });
       return;
     }
@@ -159,7 +290,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   router.get('/art/:file', async (req: Request, res: Response) => {
     const filePath = decodeURIComponent(req.params.file);
 
-    if (!isPathWithinMusicDir(filePath)) {
+    if (!await isPathWithinMediaLocations(filePath)) {
       res.status(403).json({ error: 'access denied' });
       return;
     }

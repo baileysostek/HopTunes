@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Typography } from '@mui/material';
 import Confetti from 'react-confetti';
-import { usePlayerStore } from '../store/playerStore';
 import { getApiBase } from '../types/song';
 
 const CloseIcon = () => (
@@ -47,11 +46,9 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
   const [closing, setClosing] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  const devices = usePlayerStore(s => s.devices);
-  const thisDeviceId = usePlayerStore(s => s.thisDeviceId);
-  const deviceSnapshot = useRef<Map<string, number>>(new Map());
   const modalOpenedAt = useRef<number>(0);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Track window size for confetti
   useEffect(() => {
@@ -60,60 +57,52 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Handle open: trigger enter animation
+  // Handle open: trigger enter animation + fetch QR + start polling
   useEffect(() => {
     if (open) {
       setClosing(false);
-      // Force a frame so the initial state renders before transitioning
       requestAnimationFrame(() => {
         requestAnimationFrame(() => setVisible(true));
       });
       modalOpenedAt.current = Date.now();
-      deviceSnapshot.current = new Map(devices.map(d => [d.id, d.lastSeen]));
       setPhase('qr');
       setConnectedDevice(null);
       setError('');
+
+      // Fetch QR code
+      fetch(`${getApiBase()}/api/connect/qr`)
+        .then(r => r.json())
+        .then(data => setQrData(data))
+        .catch(() => setError('Failed to generate QR code'));
+
+      // Poll for a pairing event authenticated with this QR's secret
+      pollTimer.current = setInterval(async () => {
+        try {
+          const res = await fetch(`${getApiBase()}/api/connect/last-pairing?since=${modalOpenedAt.current}`);
+          const event = await res.json();
+          if (event && event.device) {
+            // A device actually paired — stop polling and celebrate
+            if (pollTimer.current) clearInterval(pollTimer.current);
+            pollTimer.current = null;
+            setConnectedDevice(event.device);
+            setPhase('connected');
+            autoCloseTimer.current = setTimeout(() => {
+              triggerClose();
+            }, CELEBRATION_DURATION);
+          }
+        } catch {
+          // Silent fail — keep polling
+        }
+      }, 2000);
     } else {
       setVisible(false);
     }
     return () => {
       if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current);
+      if (pollTimer.current) clearInterval(pollTimer.current);
+      pollTimer.current = null;
     };
   }, [open]);
-
-  // Fetch QR code when modal opens
-  useEffect(() => {
-    if (!open) return;
-    fetch(`${getApiBase()}/api/connect/qr`)
-      .then(r => r.json())
-      .then(data => setQrData(data))
-      .catch(() => setError('Failed to generate QR code'));
-  }, [open]);
-
-  // Watch for new or re-registering device connections
-  useEffect(() => {
-    if (!open || phase !== 'qr') return;
-
-    for (const device of devices) {
-      // Skip this device (the desktop itself)
-      if (device.id === thisDeviceId) continue;
-
-      const prevLastSeen = deviceSnapshot.current.get(device.id);
-      const isNew = prevLastSeen === undefined;
-      // Treat as reconnected if lastSeen jumped since modal opened
-      const isReconnected = !isNew && device.lastSeen > modalOpenedAt.current && device.lastSeen !== prevLastSeen;
-
-      if (isNew || isReconnected) {
-        setConnectedDevice({ name: device.name, type: device.type });
-        setPhase('connected');
-
-        autoCloseTimer.current = setTimeout(() => {
-          triggerClose();
-        }, CELEBRATION_DURATION);
-        break;
-      }
-    }
-  }, [devices, open, phase, thisDeviceId]);
 
   const triggerClose = useCallback(() => {
     if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current);
