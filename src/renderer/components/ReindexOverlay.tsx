@@ -1,6 +1,7 @@
 import React from 'react';
 import { create } from 'zustand';
 import { Box, Typography } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 
 interface ReindexState {
   active: boolean;
@@ -21,6 +22,7 @@ export const useReindexStore = create<ReindexState>((set) => ({
 const ReindexOverlay: React.FC = () => {
   const active = useReindexStore(s => s.active);
   const found = useReindexStore(s => s.found);
+  const theme = useTheme();
 
   if (!active) return null;
 
@@ -49,8 +51,9 @@ const ReindexOverlay: React.FC = () => {
           width: 48,
           height: 48,
           borderRadius: '50%',
-          border: '3px solid rgba(255,255,255,0.1)',
-          borderTopColor: '#1db954',
+          border: '3px solid',
+          borderColor: 'divider',
+          borderTopColor: theme.palette.primary.main,
           animation: 'reindex-spin 0.8s linear infinite',
           '@keyframes reindex-spin': {
             '0%': { transform: 'rotate(0deg)' },
@@ -61,14 +64,14 @@ const ReindexOverlay: React.FC = () => {
       <Typography sx={{
         fontSize: 18,
         fontWeight: 600,
-        color: 'white',
+        color: 'text.primary',
         letterSpacing: 0.5,
       }}>
         Reindexing Library
       </Typography>
       <Typography sx={{
         fontSize: 13,
-        color: 'rgba(255,255,255,0.4)',
+        color: 'text.secondary',
       }}>
         {found > 0
           ? `Found ${found.toLocaleString()} song${found === 1 ? '' : 's'}...`

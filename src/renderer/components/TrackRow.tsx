@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import { Song } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
 import { useContextMenuStore } from './SongContextMenu';
@@ -21,6 +22,7 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const showContextMenu = useContextMenuStore(s => s.show);
   const isActive = currentTrack?.path === track.path;
+  const theme = useTheme();
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -38,11 +40,11 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
         px: 1.5,
         borderRadius: 1,
         cursor: 'pointer',
-        color: isActive ? '#1db954' : 'rgba(255,255,255,0.7)',
+        color: isActive ? 'primary.main' : 'text.secondary',
         transition: 'background 0.15s',
         '&:hover': {
-          bgcolor: 'rgba(255,255,255,0.08)',
-          color: isActive ? '#1db954' : 'white',
+          bgcolor: 'divider',
+          color: isActive ? 'primary.main' : 'text.primary',
         },
       }}
     >
@@ -70,7 +72,7 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
       <Typography sx={{
         fontSize: 11,
         ml: 2,
-        color: 'rgba(255,255,255,0.25)',
+        color: 'text.disabled',
         fontFamily: 'monospace',
       }}>
         {track.hash?.slice(0, 8)}
@@ -78,7 +80,7 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
       <Typography sx={{
         fontSize: 13,
         ml: 2,
-        color: 'rgba(255,255,255,0.4)',
+        color: 'text.secondary',
         fontVariantNumeric: 'tabular-nums',
       }}>
         {formatDuration(track.duration)}

@@ -44,15 +44,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
     <Box sx={{
       width: 240,
       minWidth: 240,
-      bgcolor: '#0f0f0f',
-      borderRight: '1px solid rgba(255,255,255,0.06)',
+      bgcolor: 'background.default',
+      borderRight: '1px solid',
+      borderRightColor: 'divider',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
     }}>
       {/* App title — draggable like a title bar */}
       <Box sx={{ px: 2.5, pt: 2.5, pb: 1, WebkitAppRegion: 'drag' }}>
-        <Typography sx={{ fontSize: 22, fontWeight: 800, color: 'white', letterSpacing: -0.5 }}>
+        <Typography sx={{ fontSize: 22, fontWeight: 800, color: 'text.primary', letterSpacing: -0.5 }}>
           OpenTunes
         </Typography>
       </Box>
@@ -62,7 +63,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
         <Typography sx={{
           fontSize: 11,
           fontWeight: 700,
-          color: 'rgba(255,255,255,0.4)',
+          color: 'text.secondary',
           textTransform: 'uppercase',
           letterSpacing: 1,
         }}>
@@ -82,23 +83,23 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
               mb: 0.25,
               py: 0.75,
               '&.Mui-selected': {
-                bgcolor: 'rgba(255,255,255,0.1)',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.12)' },
+                bgcolor: 'action.selected',
+                '&:hover': { bgcolor: 'action.selected' },
               },
-              '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+              '&:hover': { bgcolor: 'divider' },
             }}
           >
             <Box sx={{
               width: 32,
               height: 32,
               borderRadius: '50%',
-              bgcolor: selectedArtist === null ? '#1db954' : 'rgba(255,255,255,0.1)',
+              bgcolor: selectedArtist === null ? 'primary.main' : 'action.selected',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               mr: 1.5,
               flexShrink: 0,
-              color: selectedArtist === null ? 'white' : 'rgba(255,255,255,0.6)',
+              color: selectedArtist === null ? 'text.primary' : 'text.secondary',
               transition: 'all 0.15s',
             }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -110,7 +111,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
               primaryTypographyProps={{
                 fontSize: 14,
                 fontWeight: selectedArtist === null ? 600 : 400,
-                color: 'white',
+                color: 'text.primary',
               }}
             />
           </ListItemButton>
@@ -125,17 +126,17 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
                 mb: 0.25,
                 py: 0.75,
                 '&.Mui-selected': {
-                  bgcolor: 'rgba(255,255,255,0.1)',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.12)' },
+                  bgcolor: 'action.selected',
+                  '&:hover': { bgcolor: 'action.selected' },
                 },
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                '&:hover': { bgcolor: 'divider' },
               }}
             >
               <Box sx={{
                 width: 32,
                 height: 32,
                 borderRadius: '50%',
-                bgcolor: '#282828',
+                bgcolor: 'background.paper',
                 overflow: 'hidden',
                 display: 'flex',
                 alignItems: 'center',
@@ -151,7 +152,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
                     sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 ) : (
-                  <Typography sx={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
+                  <Typography sx={{ fontSize: 14, color: 'text.secondary', fontWeight: 600 }}>
                     {artist.charAt(0).toUpperCase()}
                   </Typography>
                 )}
@@ -161,7 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
                 primaryTypographyProps={{
                   fontSize: 14,
                   fontWeight: selectedArtist === artist ? 600 : 400,
-                  color: 'white',
+                  color: 'text.primary',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -173,8 +174,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
       </Box>
 
       {/* Bottom: song count + connect + settings */}
-      <Box sx={{ px: 2.5, py: 2, borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+      <Box sx={{ px: 2.5, py: 2, borderTop: '1px solid', borderTopColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Typography sx={{ fontSize: 12, color: 'text.disabled' }}>
           {songs.length} song{songs.length !== 1 ? 's' : ''}
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -183,8 +184,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
               onClick={onConnectClick}
               sx={{
                 cursor: 'pointer',
-                color: 'rgba(255,255,255,0.3)',
-                '&:hover': { color: '#1db954' },
+                color: 'text.disabled',
+                '&:hover': { color: 'primary.main' },
                 display: 'flex',
                 alignItems: 'center',
                 transition: 'color 0.15s',
@@ -197,8 +198,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick }) =>
             onClick={onSettingsClick}
             sx={{
               cursor: 'pointer',
-              color: 'rgba(255,255,255,0.3)',
-              '&:hover': { color: 'rgba(255,255,255,0.7)' },
+              color: 'text.disabled',
+              '&:hover': { color: 'text.secondary' },
               display: 'flex',
               alignItems: 'center',
               transition: 'color 0.15s',

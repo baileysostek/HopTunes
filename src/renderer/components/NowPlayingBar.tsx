@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Typography, Slider } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore, DeviceInfo } from '../store/playerStore';
 import { getMediaUrl } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
@@ -81,6 +82,7 @@ interface NowPlayingBarProps {
 }
 
 const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
+  const theme = useTheme();
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const isPlaying = usePlayerStore(s => s.isPlaying);
   const currentTime = usePlayerStore(s => s.currentTime);
@@ -112,8 +114,9 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
   return (
     <Box sx={{
       height: 90,
-      bgcolor: '#181818',
-      borderTop: '1px solid rgba(255,255,255,0.08)',
+      bgcolor: 'background.paper',
+      borderTop: '1px solid',
+      borderTopColor: 'divider',
       display: 'flex',
       alignItems: 'center',
       px: 2,
@@ -128,7 +131,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               height: 56,
               borderRadius: 1,
               overflow: 'hidden',
-              bgcolor: '#282828',
+              bgcolor: 'background.paper',
               mr: 1.5,
               flexShrink: 0,
             }}>
@@ -153,7 +156,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: 'rgba(255,255,255,0.3)',
+                  color: 'text.disabled',
                 }}>
                   <MusicNoteIcon />
                 </Box>
@@ -163,7 +166,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               <Typography sx={{
                 fontSize: 14,
                 fontWeight: 500,
-                color: 'white',
+                color: 'text.primary',
                 whiteSpace: 'nowrap',
                 textOverflow: 'ellipsis',
                 overflow: 'hidden',
@@ -172,7 +175,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               </Typography>
               <Typography sx={{
                 fontSize: 12,
-                color: 'rgba(255,255,255,0.5)',
+                color: 'text.secondary',
                 whiteSpace: 'nowrap',
                 textOverflow: 'ellipsis',
                 overflow: 'hidden',
@@ -182,7 +185,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             </Box>
           </>
         ) : (
-          <Typography sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>
+          <Typography sx={{ color: 'text.disabled', fontSize: 14 }}>
             No track playing
           </Typography>
         )}
@@ -195,8 +198,8 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             onClick={prev}
             sx={{
               cursor: 'pointer',
-              color: 'rgba(255,255,255,0.6)',
-              '&:hover': { color: 'white' },
+              color: 'text.secondary',
+              '&:hover': { color: 'text.primary' },
               display: 'flex',
               alignItems: 'center',
             }}
@@ -225,8 +228,8 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             onClick={next}
             sx={{
               cursor: 'pointer',
-              color: 'rgba(255,255,255,0.6)',
-              '&:hover': { color: 'white' },
+              color: 'text.secondary',
+              '&:hover': { color: 'text.primary' },
               display: 'flex',
               alignItems: 'center',
             }}
@@ -237,7 +240,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
         <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
           <Typography sx={{
             fontSize: 11,
-            color: 'rgba(255,255,255,0.5)',
+            color: 'text.secondary',
             minWidth: 40,
             textAlign: 'right',
             fontVariantNumeric: 'tabular-nums',
@@ -251,7 +254,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             onChange={(_, val) => seek(val as number)}
             sx={{
               mx: 1.5,
-              color: 'white',
+              color: 'text.primary',
               height: 4,
               '& .MuiSlider-thumb': {
                 width: 12,
@@ -260,12 +263,12 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                 '&:hover, &.Mui-focusVisible': { boxShadow: 'none' },
               },
               '& .MuiSlider-track': { transition: 'none' },
-              '& .MuiSlider-rail': { bgcolor: 'rgba(255,255,255,0.15)' },
+              '& .MuiSlider-rail': { bgcolor: 'divider' },
             }}
           />
           <Typography sx={{
             fontSize: 11,
-            color: 'rgba(255,255,255,0.5)',
+            color: 'text.secondary',
             minWidth: 40,
             fontVariantNumeric: 'tabular-nums',
           }}>
@@ -282,8 +285,8 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             onClick={toggleQueue}
             sx={{
               cursor: 'pointer',
-              color: queueVisible ? '#1db954' : 'rgba(255,255,255,0.5)',
-              '&:hover': { color: queueVisible ? '#1db954' : 'white' },
+              color: queueVisible ? theme.palette.primary.main : 'text.secondary',
+              '&:hover': { color: queueVisible ? theme.palette.primary.main : 'text.primary' },
               display: 'flex',
               alignItems: 'center',
               flexShrink: 0,
@@ -294,7 +297,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             </svg>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 100 }}>
-            <Box sx={{ color: 'rgba(255,255,255,0.6)', mr: 1, display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ color: 'text.secondary', mr: 1, display: 'flex', alignItems: 'center' }}>
               <VolumeIcon />
             </Box>
             <Slider
@@ -304,14 +307,14 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               step={0.01}
               onChange={(_, val) => setVolume(val as number)}
               sx={{
-                color: 'white',
+                color: 'text.primary',
                 height: 4,
                 '& .MuiSlider-thumb': {
                   width: 12,
                   height: 12,
                   '&:hover, &.Mui-focusVisible': { boxShadow: 'none' },
                 },
-                '& .MuiSlider-rail': { bgcolor: 'rgba(255,255,255,0.15)' },
+                '& .MuiSlider-rail': { bgcolor: 'divider' },
               }}
             />
           </Box>
@@ -330,12 +333,12 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               flex: 1,
               gap: 0.5,
               cursor: 'pointer',
-              color: playingElsewhere ? '#1db954' : deviceMenuOpen ? '#1db954' : 'rgba(255,255,255,0.4)',
-              '&:hover': { color: playingElsewhere ? '#1ed760' : deviceMenuOpen ? '#1db954' : 'rgba(255,255,255,0.7)' },
+              color: playingElsewhere ? theme.palette.primary.main : deviceMenuOpen ? theme.palette.primary.main : 'text.secondary',
+              '&:hover': { color: playingElsewhere ? theme.palette.primary.light : deviceMenuOpen ? theme.palette.primary.main : 'text.secondary' },
               py: 0.25,
               px: playingElsewhere ? 1 : 0,
               borderRadius: 1,
-              border: playingElsewhere ? '1px solid rgba(29, 185, 84, 0.35)' : '1px solid transparent',
+              border: playingElsewhere ? `1px solid ${alpha(theme.palette.primary.main, 0.35)}` : '1px solid transparent',
               transition: 'all 0.2s ease',
             }}
           >
@@ -353,7 +356,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                bgcolor: '#1db954',
+                bgcolor: theme.palette.primary.main,
                 ml: 'auto',
                 alignSelf: 'center',
                 mt: '-2px',
@@ -374,7 +377,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               bottom: '100%',
               right: 0,
               mb: 1,
-              bgcolor: '#282828',
+              bgcolor: 'background.paper',
               borderRadius: 1,
               boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
               minWidth: 220,
@@ -384,7 +387,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               <Typography sx={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: 'white',
+                color: 'text.primary',
                 px: 2,
                 py: 1,
               }}>
@@ -404,17 +407,17 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                     px: 2,
                     py: 1,
                     cursor: 'pointer',
-                    bgcolor: device.id === activeDeviceId ? 'rgba(29,185,84,0.1)' : 'transparent',
-                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' },
+                    bgcolor: device.id === activeDeviceId ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+                    '&:hover': { bgcolor: 'action.selected' },
                   }}
                 >
-                  <Box sx={{ color: device.id === activeDeviceId ? '#1db954' : 'rgba(255,255,255,0.6)' }}>
+                  <Box sx={{ color: device.id === activeDeviceId ? theme.palette.primary.main : 'text.secondary' }}>
                     <DeviceIcon type={device.type} />
                   </Box>
                   <Box>
                     <Typography sx={{
                       fontSize: 13,
-                      color: device.id === activeDeviceId ? '#1db954' : 'white',
+                      color: device.id === activeDeviceId ? theme.palette.primary.main : 'text.primary',
                       fontWeight: device.id === activeDeviceId ? 600 : 400,
                     }}>
                       {device.name}
@@ -424,13 +427,13 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                 </Box>
               ))}
               {devices.length === 0 && (
-                <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', px: 2, py: 1 }}>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', px: 2, py: 1 }}>
                   No devices connected
                 </Typography>
               )}
               {onConnectClick && (
                 <>
-                  <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', mx: 1, my: 0.5 }} />
+                  <Box sx={{ borderTop: '1px solid', borderTopColor: 'divider', mx: 1, my: 0.5 }} />
                   <Box
                     onClick={() => {
                       setDeviceMenuOpen(false);
@@ -443,15 +446,15 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                       px: 2,
                       py: 1,
                       cursor: 'pointer',
-                      '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' },
+                      '&:hover': { bgcolor: 'action.selected' },
                     }}
                   >
-                    <Box sx={{ color: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center' }}>
+                    <Box sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
                       </svg>
                     </Box>
-                    <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
+                    <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
                       Connect a device
                     </Typography>
                   </Box>

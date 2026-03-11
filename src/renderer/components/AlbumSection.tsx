@@ -44,12 +44,12 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
       sx={{
         display: 'flex',
         mb: 2,
-        bgcolor: 'rgba(255,255,255,0.03)',
+        bgcolor: 'action.hover',
         borderRadius: 2,
         overflow: 'hidden',
         transition: 'background 0.2s',
         '&:hover': {
-          bgcolor: 'rgba(255,255,255,0.05)',
+          bgcolor: 'action.hover',
         },
       }}
     >
@@ -58,7 +58,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
         width: 160,
         minWidth: 160,
         minHeight: 160,
-        bgcolor: '#1a1a1a',
+        bgcolor: 'background.paper',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -80,7 +80,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
             sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         ) : (
-          <Box sx={{ color: 'rgba(255,255,255,0.2)' }}>
+          <Box sx={{ color: 'text.disabled' }}>
             <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
             </svg>
@@ -91,7 +91,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
       {/* Track List */}
       <Box sx={{ flex: 1, py: 1.5, px: 2, minWidth: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'white', fontSize: 24 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary', fontSize: 24 }}>
             {albumName}
           </Typography>
           <Box
@@ -100,7 +100,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
               width: 28,
               height: 28,
               borderRadius: '50%',
-              bgcolor: '#1db954',
+              bgcolor: 'primary.main',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -117,7 +117,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
             </svg>
           </Box>
         </Box>
-        <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', mb: 1 }}>
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1 }}>
           {sortedTracks.length} track{sortedTracks.length !== 1 ? 's' : ''}
           {formatTotalDuration(sortedTracks) && ` \u00B7 ${formatTotalDuration(sortedTracks)}`}
         </Typography>

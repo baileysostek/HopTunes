@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { parseFile } from 'music-metadata';
 import { Song, ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
@@ -137,7 +138,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   router.get('/library/locations', async (_req: Request, res: Response) => {
     try {
       const locations = await getMediaLocations();
-      res.json(locations);
+      res.json({ locations, serverName: os.hostname() });
     } catch (err) {
       console.error('Failed to get media locations:', err);
       res.status(500).json({ error: 'Failed to get media locations' });

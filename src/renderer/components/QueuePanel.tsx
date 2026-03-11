@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Box, Typography } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore } from '../store/playerStore';
 import { getMediaUrl, Song } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
@@ -44,6 +45,7 @@ interface QueueItemProps {
 const QueueItem: React.FC<QueueItemProps> = ({
   song, index, dragIndex, dropTarget, onDragStart, onDragOver, onDrop, onDragEnd, onRemove, onPlay,
 }) => {
+  const theme = useTheme();
   const isDragging = dragIndex === index;
   const isDropTarget = dropTarget === index;
 
@@ -62,14 +64,14 @@ const QueueItem: React.FC<QueueItemProps> = ({
         borderRadius: 1,
         cursor: 'grab',
         opacity: isDragging ? 0.4 : 1,
-        borderTop: isDropTarget ? '2px solid #1db954' : '2px solid transparent',
+        borderTop: isDropTarget ? `2px solid ${theme.palette.primary.main}` : '2px solid transparent',
         transition: 'background 0.1s',
-        '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+        '&:hover': { bgcolor: 'action.hover' },
         '&:hover .queue-remove': { opacity: 1 },
       }}
     >
       {/* Drag handle */}
-      <Box sx={{ color: 'rgba(255,255,255,0.25)', mr: 1, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+      <Box sx={{ color: 'text.disabled', mr: 1, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         <DragHandleIcon />
       </Box>
 
@@ -80,7 +82,7 @@ const QueueItem: React.FC<QueueItemProps> = ({
       >
         <Typography sx={{
           fontSize: 13,
-          color: 'white',
+          color: 'text.primary',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -89,7 +91,7 @@ const QueueItem: React.FC<QueueItemProps> = ({
         </Typography>
         <Typography sx={{
           fontSize: 11,
-          color: 'rgba(255,255,255,0.4)',
+          color: 'text.secondary',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -101,7 +103,7 @@ const QueueItem: React.FC<QueueItemProps> = ({
       {/* Duration */}
       <Typography sx={{
         fontSize: 12,
-        color: 'rgba(255,255,255,0.35)',
+        color: 'text.disabled',
         mx: 1,
         fontVariantNumeric: 'tabular-nums',
         flexShrink: 0,
@@ -116,8 +118,8 @@ const QueueItem: React.FC<QueueItemProps> = ({
         sx={{
           opacity: 0,
           cursor: 'pointer',
-          color: 'rgba(255,255,255,0.4)',
-          '&:hover': { color: 'white' },
+          color: 'text.secondary',
+          '&:hover': { color: 'text.primary' },
           display: 'flex',
           alignItems: 'center',
           flexShrink: 0,
@@ -130,6 +132,7 @@ const QueueItem: React.FC<QueueItemProps> = ({
 };
 
 const QueuePanel: React.FC = () => {
+  const theme = useTheme();
   const queue = usePlayerStore(s => s.queue);
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const queueVisible = usePlayerStore(s => s.queueVisible);
@@ -177,8 +180,9 @@ const QueuePanel: React.FC = () => {
     <Box sx={{
       width: queueVisible ? 320 : 0,
       minWidth: queueVisible ? 320 : 0,
-      bgcolor: '#141414',
-      borderLeft: queueVisible ? '1px solid rgba(255,255,255,0.06)' : 'none',
+      bgcolor: 'background.paper',
+      borderLeft: queueVisible ? '1px solid' : 'none',
+      borderLeftColor: queueVisible ? 'divider' : undefined,
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
@@ -193,17 +197,18 @@ const QueuePanel: React.FC = () => {
         px: 2,
         pt: '38px',
         pb: 1.5,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid',
+        borderBottomColor: 'divider',
       }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 700, color: 'white' }}>
+        <Typography sx={{ fontSize: 16, fontWeight: 700, color: 'text.primary' }}>
           Queue
         </Typography>
         <Box
           onClick={toggleQueue}
           sx={{
             cursor: 'pointer',
-            color: 'rgba(255,255,255,0.5)',
-            '&:hover': { color: 'white' },
+            color: 'text.secondary',
+            '&:hover': { color: 'text.primary' },
             display: 'flex',
             alignItems: 'center',
           }}
@@ -219,7 +224,7 @@ const QueuePanel: React.FC = () => {
             <Typography sx={{
               fontSize: 11,
               fontWeight: 700,
-              color: 'rgba(255,255,255,0.4)',
+              color: 'text.secondary',
               textTransform: 'uppercase',
               letterSpacing: 1,
               px: 1,
@@ -233,14 +238,14 @@ const QueuePanel: React.FC = () => {
               py: 0.75,
               px: 1,
               borderRadius: 1,
-              bgcolor: 'rgba(29, 185, 84, 0.1)',
+              bgcolor: alpha(theme.palette.primary.main, 0.1),
             }}>
               <Box sx={{
                 width: 36,
                 height: 36,
                 borderRadius: 0.5,
                 overflow: 'hidden',
-                bgcolor: '#282828',
+                bgcolor: 'background.paper',
                 mr: 1.5,
                 flexShrink: 0,
               }}>
@@ -262,7 +267,7 @@ const QueuePanel: React.FC = () => {
                 <Typography sx={{
                   fontSize: 13,
                   fontWeight: 500,
-                  color: '#1db954',
+                  color: theme.palette.primary.main,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -271,7 +276,7 @@ const QueuePanel: React.FC = () => {
                 </Typography>
                 <Typography sx={{
                   fontSize: 11,
-                  color: 'rgba(255,255,255,0.4)',
+                  color: 'text.secondary',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -288,7 +293,7 @@ const QueuePanel: React.FC = () => {
           <Typography sx={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'rgba(255,255,255,0.4)',
+            color: 'text.secondary',
             textTransform: 'uppercase',
             letterSpacing: 1,
             px: 1,
@@ -298,7 +303,7 @@ const QueuePanel: React.FC = () => {
           </Typography>
 
           {queue.length === 0 ? (
-            <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', px: 1, py: 2, textAlign: 'center' }}>
+            <Typography sx={{ fontSize: 13, color: 'text.disabled', px: 1, py: 2, textAlign: 'center' }}>
               Queue is empty
             </Typography>
           ) : (

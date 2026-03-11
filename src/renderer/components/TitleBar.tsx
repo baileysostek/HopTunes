@@ -32,10 +32,10 @@ const TitleBar: React.FC = () => {
   const buttonSx = {
     borderRadius: 0,
     width: 46,
-    color: 'rgba(255,255,255,0.8)',
+    color: 'text.primary',
     WebkitAppRegion: 'no-drag',
     '&:hover': {
-      bgcolor: 'rgba(255,255,255,0.1)',
+      bgcolor: 'action.selected',
     },
   };
 

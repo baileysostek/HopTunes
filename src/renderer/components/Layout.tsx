@@ -28,7 +28,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const showConnect = isElectron();
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#0a0a0a' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: 'background.default' }}>
       <TitleBar />
       {/* Top: sidebar + content */}
       <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>

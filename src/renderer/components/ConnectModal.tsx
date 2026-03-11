@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Typography } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import Confetti from 'react-confetti';
 import { getApiBase } from '../types/song';
 
@@ -38,6 +39,7 @@ interface ConnectModalProps {
 }
 
 const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
+  const theme = useTheme();
   const [qrData, setQrData] = useState<{ qr: string; host: string } | null>(null);
   const [error, setError] = useState('');
   const [phase, setPhase] = useState<ModalPhase>('qr');
@@ -145,14 +147,14 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
           recycle={true}
           initialVelocityY={20}
           tweenDuration={100}
-          colors={['#1db954', '#1ed760', '#ffffff', '#b3b3b3', '#1a1a2e']}
+          colors={[theme.palette.primary.main, theme.palette.primary.light, '#ffffff', '#b3b3b3', '#1a1a2e']}
         />
       )}
 
       <Box
         onClick={(e) => e.stopPropagation()}
         sx={{
-          bgcolor: '#1a1a1a',
+          bgcolor: 'background.paper',
           borderRadius: 3,
           p: 4,
           position: 'relative',
@@ -172,8 +174,8 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
             top: 16,
             right: 16,
             cursor: 'pointer',
-            color: 'rgba(255,255,255,0.4)',
-            '&:hover': { color: 'white' },
+            color: 'text.secondary',
+            '&:hover': { color: 'text.primary' },
             display: 'flex',
             alignItems: 'center',
             transition: 'color 0.15s',
@@ -184,25 +186,26 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
 
         {phase === 'qr' && (
           <>
-            <Typography sx={{ fontSize: 24, fontWeight: 700, color: 'white', mb: 1 }}>
+            <Typography sx={{ fontSize: 24, fontWeight: 700, color: 'text.primary', mb: 1 }}>
               Connect a Device
             </Typography>
-            <Typography sx={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', mb: 3 }}>
+            <Typography sx={{ fontSize: 14, color: 'text.secondary', mb: 3 }}>
               Scan this QR code from the OpenTunes mobile app to connect.
             </Typography>
 
             {error && (
-              <Typography sx={{ color: '#ff5252', fontSize: 14, mb: 2 }}>{error}</Typography>
+              <Typography sx={{ color: 'error.main', fontSize: 14, mb: 2 }}>{error}</Typography>
             )}
 
             {qrData ? (
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <Box sx={{
-                  bgcolor: '#111',
+                  bgcolor: 'background.default',
                   borderRadius: 2,
                   p: 2.5,
                   display: 'inline-flex',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  border: '1px solid',
+                  borderColor: 'divider',
                 }}>
                   <img
                     src={qrData.qr}
@@ -210,12 +213,12 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
                     style={{ width: 240, height: 240, display: 'block' }}
                   />
                 </Box>
-                <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+                <Typography sx={{ fontSize: 12, color: 'text.disabled' }}>
                   Server: {qrData.host}
                 </Typography>
               </Box>
             ) : !error ? (
-              <Box sx={{ py: 6, color: 'rgba(255,255,255,0.3)' }}>
+              <Box sx={{ py: 6, color: 'text.disabled' }}>
                 <Typography sx={{ fontSize: 14 }}>Loading...</Typography>
               </Box>
             ) : null}
@@ -227,13 +230,13 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
               justifyContent: 'center',
               gap: 1,
               mt: 3,
-              color: 'rgba(255,255,255,0.35)',
+              color: 'text.disabled',
             }}>
               <Box sx={{
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                bgcolor: 'rgba(29, 185, 84, 0.6)',
+                bgcolor: alpha(theme.palette.primary.main, 0.6),
                 animation: 'pulse 1.5s ease-in-out infinite',
                 '@keyframes pulse': {
                   '0%, 100%': { opacity: 0.4, transform: 'scale(0.8)' },
@@ -253,13 +256,13 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
               width: 72,
               height: 72,
               borderRadius: '50%',
-              bgcolor: 'rgba(29, 185, 84, 0.15)',
+              bgcolor: alpha(theme.palette.primary.main, 0.15),
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               mx: 'auto',
               mb: 3,
-              color: '#1db954',
+              color: theme.palette.primary.main,
               animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
               '@keyframes popIn': {
                 '0%': { transform: 'scale(0)', opacity: 0 },
@@ -272,7 +275,7 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
             <Typography sx={{
               fontSize: 28,
               fontWeight: 700,
-              color: 'white',
+              color: 'text.primary',
               mb: 1,
               animation: 'fadeUp 0.4s ease 0.15s both',
               '@keyframes fadeUp': {
@@ -291,10 +294,10 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
               mb: 3,
               animation: 'fadeUp 0.4s ease 0.3s both',
             }}>
-              <Box sx={{ color: 'rgba(255,255,255,0.5)' }}>
+              <Box sx={{ color: 'text.secondary' }}>
                 <DeviceIcon type={connectedDevice.type} />
               </Box>
-              <Typography sx={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>
+              <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
                 Your device is ready to use.
               </Typography>
             </Box>
@@ -304,7 +307,7 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
               width: '80%',
               height: 3,
               borderRadius: 1.5,
-              bgcolor: 'rgba(255,255,255,0.08)',
+              bgcolor: 'divider',
               mx: 'auto',
               overflow: 'hidden',
               animation: 'fadeUp 0.4s ease 0.45s both',
@@ -312,7 +315,7 @@ const ConnectModal: React.FC<ConnectModalProps> = ({ open, onClose }) => {
               <Box sx={{
                 height: '100%',
                 borderRadius: 1.5,
-                bgcolor: '#1db954',
+                bgcolor: theme.palette.primary.main,
                 animation: `shrink ${CELEBRATION_DURATION}ms linear forwards`,
                 '@keyframes shrink': {
                   '0%': { width: '100%' },

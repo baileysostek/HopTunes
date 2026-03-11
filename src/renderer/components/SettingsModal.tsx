@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Typography, Button, IconButton } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import { isElectron } from '../utils/platform';
 import { getApiBase, setApiBase, setAuthToken } from '../types/song';
+import { useThemeStore, ACCENT_PRESETS, ThemeMode } from '../store/themeStore';
 import axios from 'axios';
 import ConnectModal from './ConnectModal';
 
@@ -87,6 +89,7 @@ interface SettingsModalProps {
 // --- Tab Content Components ---
 
 const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice }) => {
+  const theme = useTheme();
   const [devices, setDevices] = useState<RegisteredDeviceInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -142,22 +145,23 @@ const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice 
                 display: 'flex',
                 alignItems: 'center',
                 gap: 2,
-                bgcolor: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
+                bgcolor: 'action.hover',
+                border: '1px solid',
+                borderColor: 'divider',
                 borderRadius: 2,
                 px: 2,
                 py: 1.5,
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' },
+                '&:hover': { bgcolor: 'action.selected' },
               }}
             >
-              <Box sx={{ color: 'rgba(255,255,255,0.5)', display: 'flex' }}>
+              <Box sx={{ color: 'text.secondary', display: 'flex' }}>
                 <DeviceTypeIcon type={device.type} />
               </Box>
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'white' }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary' }}>
                   {device.name}
                 </Typography>
-                <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
                   Paired {formatDate(device.firstSeen)} &middot; Last seen {formatLastSeen(device.lastSeen)}
                 </Typography>
               </Box>
@@ -165,8 +169,8 @@ const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice 
                 size="small"
                 onClick={() => handleRevoke(device.id)}
                 sx={{
-                  color: 'rgba(255,255,255,0.3)',
-                  '&:hover': { color: '#ff5252', bgcolor: 'rgba(255,82,82,0.1)' },
+                  color: 'text.disabled',
+                  '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) },
                 }}
                 title="Revoke device"
               >
@@ -183,22 +187,23 @@ const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice 
             display: 'flex',
             alignItems: 'center',
             gap: 2,
-            border: '1px dashed rgba(255,255,255,0.12)',
+            border: '1px dashed',
+            borderColor: 'divider',
             borderRadius: 2,
             px: 2,
             py: 1.5,
             cursor: 'pointer',
             transition: 'background-color 0.15s, border-color 0.15s',
             '&:hover': {
-              bgcolor: 'rgba(29,185,84,0.06)',
-              borderColor: 'rgba(29,185,84,0.3)',
+              bgcolor: alpha(theme.palette.primary.main, 0.06),
+              borderColor: alpha(theme.palette.primary.main, 0.3),
             },
           }}
         >
-          <Box sx={{ color: 'rgba(29,185,84,0.6)', display: 'flex' }}>
+          <Box sx={{ color: alpha(theme.palette.primary.main, 0.6), display: 'flex' }}>
             <AddIcon />
           </Box>
-          <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.5)' }}>
+          <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'text.secondary' }}>
             Add a device
           </Typography>
         </Box>
@@ -211,9 +216,9 @@ const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice 
           onClick={handleRevokeAll}
           sx={{
             mt: 2,
-            color: '#ff5252',
-            borderColor: 'rgba(255,82,82,0.3)',
-            '&:hover': { borderColor: '#ff5252', bgcolor: 'rgba(255,82,82,0.08)' },
+            color: 'error.main',
+            borderColor: alpha(theme.palette.error.main, 0.3),
+            '&:hover': { borderColor: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.08) },
             textTransform: 'none',
             fontSize: 13,
           }}
@@ -226,6 +231,7 @@ const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice 
 };
 
 const DevicesTabMobile = () => {
+  const theme = useTheme();
   const [scanning, setScanning] = useState(false);
   const [connected, setConnected] = useState(!!localStorage.getItem('opentunes_auth_token'));
   const [error, setError] = useState('');
@@ -308,13 +314,13 @@ const DevicesTabMobile = () => {
 
       {connected && (
         <Box sx={{
-          bgcolor: 'rgba(29, 185, 84, 0.1)',
-          border: '1px solid rgba(29, 185, 84, 0.3)',
+          bgcolor: alpha(theme.palette.primary.main, 0.1),
+          border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
           borderRadius: 1,
           p: 2,
           mb: 2,
         }}>
-          <Typography sx={{ color: '#1db954', fontSize: 14 }}>
+          <Typography sx={{ color: 'primary.main', fontSize: 14 }}>
             Connected to {getApiBase()}
           </Typography>
         </Box>
@@ -359,14 +365,17 @@ const AddIcon = () => (
 );
 
 const LibraryTab = () => {
+  const theme = useTheme();
   const [locations, setLocations] = useState<string[]>([]);
+  const [serverName, setServerName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [reindexing, setReindexing] = useState(false);
 
   const fetchLocations = useCallback(async () => {
     try {
       const res = await axios.get(`${getApiBase()}/api/library/locations`);
-      setLocations(res.data);
+      setLocations(res.data.locations);
+      setServerName(res.data.serverName || '');
     } catch {
       // Silent fail
     } finally {
@@ -421,13 +430,14 @@ const LibraryTab = () => {
         <Typography sx={{ color: 'text.secondary', fontSize: 14, py: 2 }}>Loading...</Typography>
       ) : locations.length === 0 ? (
         <Box sx={{
-          bgcolor: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          bgcolor: 'action.hover',
+          border: '1px solid',
+          borderColor: 'divider',
           borderRadius: 2,
           p: 3,
           textAlign: 'center',
         }}>
-          <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
             No media locations configured. Add a folder to get started.
           </Typography>
         </Box>
@@ -440,35 +450,41 @@ const LibraryTab = () => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 2,
-                bgcolor: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
+                bgcolor: 'action.hover',
+                border: '1px solid',
+                borderColor: 'divider',
                 borderRadius: 2,
                 px: 2,
                 py: 1.5,
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' },
+                '&:hover': { bgcolor: 'action.selected' },
               }}
             >
-              <Box sx={{ color: 'rgba(255,255,255,0.5)', display: 'flex' }}>
+              <Box sx={{ color: 'text.secondary', display: 'flex' }}>
                 <FolderIcon />
               </Box>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography sx={{
                   fontSize: 14,
                   fontWeight: 500,
-                  color: 'white',
+                  color: 'text.primary',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}>
                   {loc}
                 </Typography>
+                {serverName && (
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+                    {isElectron() ? 'This device' : serverName}
+                  </Typography>
+                )}
               </Box>
               <IconButton
                 size="small"
                 onClick={() => handleRemoveFolder(loc)}
                 sx={{
-                  color: 'rgba(255,255,255,0.3)',
-                  '&:hover': { color: '#ff5252', bgcolor: 'rgba(255,82,82,0.1)' },
+                  color: 'text.disabled',
+                  '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) },
                 }}
                 title="Remove folder"
               >
@@ -487,9 +503,9 @@ const LibraryTab = () => {
             onClick={handleAddFolder}
             startIcon={<AddIcon />}
             sx={{
-              color: 'white',
-              borderColor: 'rgba(255,255,255,0.2)',
-              '&:hover': { borderColor: 'rgba(255,255,255,0.4)', bgcolor: 'rgba(255,255,255,0.05)' },
+              color: 'text.primary',
+              borderColor: 'divider',
+              '&:hover': { borderColor: 'text.secondary', bgcolor: 'action.hover' },
               textTransform: 'none',
               fontSize: 13,
             }}
@@ -504,9 +520,9 @@ const LibraryTab = () => {
           disabled={reindexing}
           startIcon={<RefreshIcon />}
           sx={{
-            color: '#1db954',
-            borderColor: 'rgba(29,185,84,0.3)',
-            '&:hover': { borderColor: '#1db954', bgcolor: 'rgba(29,185,84,0.08)' },
+            color: 'primary.main',
+            borderColor: alpha(theme.palette.primary.main, 0.3),
+            '&:hover': { borderColor: theme.palette.primary.main, bgcolor: alpha(theme.palette.primary.main, 0.08) },
             textTransform: 'none',
             fontSize: 13,
           }}
@@ -518,42 +534,257 @@ const LibraryTab = () => {
   );
 };
 
-const ThemesTab = () => (
-  <Box>
-    <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-      Theme customization will appear here.
-    </Typography>
-    <Box sx={{
-      bgcolor: 'rgba(255,255,255,0.03)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: 2,
-      p: 3,
-      textAlign: 'center',
-    }}>
-      <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
-        Coming soon
-      </Typography>
-    </Box>
-  </Box>
+const CheckIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+  </svg>
 );
+
+const MODE_OPTIONS: { key: ThemeMode; label: string; description: string }[] = [
+  { key: 'dark',  label: 'Dark',  description: 'Easy on the eyes' },
+  { key: 'light', label: 'Light', description: 'Classic bright look' },
+  { key: 'oled',  label: 'OLED',  description: 'True black for OLED screens' },
+];
+
+const ThemesTab = () => {
+  const muiTheme = useTheme();
+  const mode = useThemeStore((s) => s.mode);
+  const accent = useThemeStore((s) => s.accent);
+  const setMode = useThemeStore((s) => s.setMode);
+  const setAccent = useThemeStore((s) => s.setAccent);
+
+  const isCustom = !ACCENT_PRESETS.some((p) => p.value === accent);
+
+  // Refs for DOM-only preview during native color picker drag — no React re-renders.
+  const customSwatchRef = useRef<HTMLDivElement>(null);
+  const previewBarRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const customBorderRef = useRef<HTMLLabelElement>(null);
+  const modeBorderRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const colorInputRef = useRef<HTMLInputElement>(null);
+
+  const cardBorder = muiTheme.palette.divider;
+  const subtleText = muiTheme.palette.text.secondary;
+
+  // Direct DOM updates for live preview — zero React re-renders
+  const handleColorInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
+    const color = (e.target as HTMLInputElement).value;
+    if (customSwatchRef.current) {
+      customSwatchRef.current.style.backgroundColor = color;
+      customSwatchRef.current.style.boxShadow = `0 0 0 2px ${muiTheme.palette.background.paper}, 0 0 0 4px ${color}`;
+      customSwatchRef.current.style.border = 'none';
+    }
+    if (customBorderRef.current) {
+      customBorderRef.current.style.borderColor = color;
+    }
+    previewBarRefs.current.forEach((el) => {
+      if (el) el.style.backgroundColor = color;
+    });
+    modeBorderRefs.current.forEach((el, i) => {
+      if (el && MODE_OPTIONS[i].key === mode) {
+        el.style.borderColor = color;
+      }
+    });
+  }, [muiTheme.palette.background.paper, mode]);
+
+  // Native 'change' event fires only when the picker is closed/confirmed.
+  useEffect(() => {
+    const input = colorInputRef.current;
+    if (!input) return;
+    const handler = () => setAccent(input.value);
+    input.addEventListener('change', handler);
+    return () => input.removeEventListener('change', handler);
+  }, [setAccent]);
+
+  return (
+    <Box>
+      {/* Mode selector */}
+      <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary', mb: 1.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Appearance
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 3 }}>
+        {MODE_OPTIONS.map((opt, modeIdx) => {
+          const selected = mode === opt.key;
+          const previewBg = opt.key === 'oled' ? '#000000' : opt.key === 'light' ? '#f5f5f5' : '#0a0a0a';
+          const previewFg = opt.key === 'light' ? '#1a1a1a' : '#ffffff';
+          return (
+            <Box
+              key={opt.key}
+              ref={(el: HTMLDivElement | null) => { modeBorderRefs.current[modeIdx] = el; }}
+              onClick={() => setMode(opt.key)}
+              sx={{
+                flex: 1,
+                cursor: 'pointer',
+                borderRadius: 2,
+                border: selected ? `2px solid ${accent}` : `1px solid ${cardBorder}`,
+                p: selected ? '11px' : '12px',
+                transition: 'border-color 0.2s, background-color 0.2s',
+                '&:hover': { bgcolor: 'action.hover' },
+              }}
+            >
+              {/* Mini preview */}
+              <Box sx={{
+                bgcolor: previewBg,
+                borderRadius: 1,
+                height: 48,
+                mb: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: `1px solid ${cardBorder}`,
+                position: 'relative',
+                overflow: 'hidden',
+              }}>
+                <Box sx={{ width: '70%', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <Box
+                    ref={(el: HTMLDivElement | null) => { previewBarRefs.current[modeIdx] = el; }}
+                    sx={{ height: 4, borderRadius: 1, bgcolor: accent, width: '60%' }}
+                  />
+                  <Box sx={{ height: 3, borderRadius: 1, bgcolor: previewFg, opacity: 0.2, width: '80%' }} />
+                  <Box sx={{ height: 3, borderRadius: 1, bgcolor: previewFg, opacity: 0.1, width: '50%' }} />
+                </Box>
+              </Box>
+              <Typography sx={{ fontSize: 13, fontWeight: selected ? 600 : 400, color: 'text.primary' }}>
+                {opt.label}
+              </Typography>
+              <Typography sx={{ fontSize: 11, color: subtleText }}>
+                {opt.description}
+              </Typography>
+            </Box>
+          );
+        })}
+      </Box>
+
+      {/* Accent color */}
+      <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary', mb: 1.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Accent Color
+      </Typography>
+      <Box sx={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 1,
+      }}>
+        {ACCENT_PRESETS.map((preset) => {
+          const selected = accent === preset.value;
+          return (
+            <Box
+              key={preset.value}
+              onClick={() => { setPickerOpen(false); setAccent(preset.value); }}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                bgcolor: selected ? 'action.selected' : 'action.hover',
+                border: selected ? `2px solid ${preset.value}` : `1px solid ${cardBorder}`,
+                borderRadius: 2,
+                px: selected ? 1.25 : 1.5,
+                py: selected ? 0.75 : 1,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                '&:hover': { bgcolor: 'action.selected' },
+              }}
+            >
+              <Box sx={{
+                width: 24,
+                height: 24,
+                borderRadius: '50%',
+                bgcolor: preset.value,
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                boxShadow: selected ? `0 0 0 2px ${muiTheme.palette.background.paper}, 0 0 0 4px ${preset.value}` : 'none',
+              }}>
+                {selected && <CheckIcon />}
+              </Box>
+              <Typography sx={{ fontSize: 12, color: 'text.primary', fontWeight: selected ? 600 : 400 }}>
+                {preset.name}
+              </Typography>
+            </Box>
+          );
+        })}
+
+        {/* Custom color picker */}
+        <Box
+          component="label"
+          ref={customBorderRef}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            bgcolor: isCustom ? 'action.selected' : 'action.hover',
+            border: isCustom ? `2px solid ${accent}` : `1px solid ${cardBorder}`,
+            borderRadius: 2,
+            px: isCustom ? 1.25 : 1.5,
+            py: isCustom ? 0.75 : 1,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            '&:hover': { bgcolor: 'action.selected' },
+          }}
+        >
+          <Box
+            ref={customSwatchRef}
+            sx={{
+              width: 24,
+              height: 24,
+              borderRadius: '50%',
+              bgcolor: isCustom ? accent : 'transparent',
+              border: isCustom ? 'none' : `2px dashed ${muiTheme.palette.text.disabled}`,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isCustom ? 'white' : muiTheme.palette.text.disabled,
+              boxShadow: isCustom ? `0 0 0 2px ${muiTheme.palette.background.paper}, 0 0 0 4px ${accent}` : 'none',
+              overflow: 'hidden',
+            }}
+          >
+            {isCustom ? <CheckIcon /> : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.66 5.41l.92.92-2.69 2.69-.92-.92 2.69-2.69M17.67 3c-.26 0-.51.1-.71.29l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.42l-2.34-2.34c-.2-.19-.45-.29-.7-.29z"/>
+              </svg>
+            )}
+          </Box>
+          <Typography sx={{ fontSize: 12, color: 'text.primary', fontWeight: isCustom ? 600 : 400 }}>
+            Custom
+          </Typography>
+          <input
+            ref={colorInputRef}
+            type="color"
+            defaultValue={accent}
+            onInput={handleColorInput}
+            style={{
+              position: 'absolute',
+              width: 0,
+              height: 0,
+              opacity: 0,
+              pointerEvents: 'none',
+            }}
+          />
+        </Box>
+      </Box>
+    </Box>
+  );
+};
 
 const AboutTab = () => (
   <Box>
     <Box sx={{ textAlign: 'center', py: 2 }}>
-      <Typography sx={{ fontSize: 28, fontWeight: 800, color: 'white', mb: 0.5 }}>
+      <Typography sx={{ fontSize: 28, fontWeight: 800, color: 'text.primary', mb: 0.5 }}>
         OpenTunes
       </Typography>
-      <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', mb: 3 }}>
+      <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 3 }}>
         Your music, everywhere.
       </Typography>
       <Box sx={{
-        bgcolor: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        bgcolor: 'action.hover',
+        border: '1px solid',
+        borderColor: 'divider',
         borderRadius: 2,
         p: 2,
         textAlign: 'left',
       }}>
-        <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 2 }}>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 2 }}>
           Platform: {isElectron() ? 'Desktop (Electron)' : 'Web / Mobile'}
         </Typography>
       </Box>
@@ -573,6 +804,7 @@ const TABS: { key: SettingsTab; label: string }[] = [
 // --- Main Modal ---
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
+  const theme = useTheme();
   const [activeTab, setActiveTab] = useState<SettingsTab>('devices');
   const [closing, setClosing] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -602,18 +834,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
 
   const showContent = visible && !closing;
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'devices':
-        return isElectron() ? <DevicesTabDesktop onAddDevice={() => setConnectModalOpen(true)} /> : <DevicesTabMobile />;
-      case 'library':
-        return <LibraryTab />;
-      case 'themes':
-        return <ThemesTab />;
-      case 'about':
-        return <AboutTab />;
-    }
-  };
+  const activeTabIndex = TABS.findIndex(t => t.key === activeTab);
 
   return (
     <>
@@ -637,7 +858,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
         <Box
           onClick={(e) => e.stopPropagation()}
           sx={{
-            bgcolor: '#1a1a1a',
+            bgcolor: 'background.paper',
             borderRadius: 3,
             position: 'relative',
             maxWidth: 560,
@@ -652,15 +873,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
         >
           {/* Header */}
           <Box sx={{ px: 3, pt: 3, pb: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'white' }}>
+            <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'text.primary' }}>
               Settings
             </Typography>
             <Box
               onClick={triggerClose}
               sx={{
                 cursor: 'pointer',
-                color: 'rgba(255,255,255,0.4)',
-                '&:hover': { color: 'white' },
+                color: 'text.secondary',
+                '&:hover': { color: 'text.primary' },
                 display: 'flex',
                 alignItems: 'center',
                 transition: 'color 0.15s',
@@ -676,7 +897,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
             gap: 0,
             px: 3,
             pt: 2,
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            borderBottom: '1px solid',
+            borderBottomColor: 'divider',
           }}>
             {TABS.map((tab) => (
               <Box
@@ -688,11 +910,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
                   cursor: 'pointer',
                   fontSize: 13,
                   fontWeight: activeTab === tab.key ? 600 : 400,
-                  color: activeTab === tab.key ? 'white' : 'rgba(255,255,255,0.4)',
-                  borderBottom: activeTab === tab.key ? '2px solid #1db954' : '2px solid transparent',
+                  color: activeTab === tab.key ? 'text.primary' : 'text.secondary',
+                  borderBottom: activeTab === tab.key ? `2px solid ${theme.palette.primary.main}` : '2px solid transparent',
                   transition: 'color 0.15s, border-color 0.15s',
                   '&:hover': {
-                    color: activeTab === tab.key ? 'white' : 'rgba(255,255,255,0.7)',
+                    color: 'text.primary',
                   },
                   userSelect: 'none',
                 }}
@@ -702,9 +924,29 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
             ))}
           </Box>
 
-          {/* Tab content */}
-          <Box sx={{ px: 3, py: 3, flex: 1, overflow: 'auto' }}>
-            {renderTabContent()}
+          {/* Tab content – horizontal sliding strip */}
+          <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            <Box
+              sx={{
+                display: 'flex',
+                height: '100%',
+                transform: `translateX(-${activeTabIndex * 100}%)`,
+                transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            >
+              <Box sx={{ width: '100%', height: '100%', flexShrink: 0, px: 3, py: 3, overflowY: 'auto', overflowX: 'hidden' }}>
+                {isElectron() ? <DevicesTabDesktop onAddDevice={() => setConnectModalOpen(true)} /> : <DevicesTabMobile />}
+              </Box>
+              <Box sx={{ width: '100%', height: '100%', flexShrink: 0, px: 3, py: 3, overflowY: 'auto', overflowX: 'hidden' }}>
+                <LibraryTab />
+              </Box>
+              <Box sx={{ width: '100%', height: '100%', flexShrink: 0, px: 3, py: 3, overflowY: 'auto', overflowX: 'hidden' }}>
+                <ThemesTab />
+              </Box>
+              <Box sx={{ width: '100%', height: '100%', flexShrink: 0, px: 3, py: 3, overflowY: 'auto', overflowX: 'hidden' }}>
+                <AboutTab />
+              </Box>
+            </Box>
           </Box>
         </Box>
       </Box>

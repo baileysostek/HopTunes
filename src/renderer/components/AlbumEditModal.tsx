@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Typography, Button, Checkbox } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import axios from 'axios';
 import { Song, getApiBase } from '../types/song';
 
@@ -24,6 +25,7 @@ interface AlbumEditModalProps {
 }
 
 const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, onClose }) => {
+  const theme = useTheme();
   const [songs, setSongs] = useState<Song[]>([]);
   const [hiddenMap, setHiddenMap] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -119,7 +121,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
       <Box
         onClick={(e) => e.stopPropagation()}
         sx={{
-          bgcolor: '#1a1a1a',
+          bgcolor: 'background.paper',
           borderRadius: 3,
           position: 'relative',
           maxWidth: 620,
@@ -133,12 +135,12 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
         }}
       >
         {/* Header */}
-        <Box sx={{ px: 3, pt: 3, pb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <Box sx={{ px: 3, pt: 3, pb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid', borderColor: 'divider' }}>
           <Box>
-            <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'white' }}>
+            <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'text.primary' }}>
               {album}
             </Typography>
-            <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
+            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
               {artist} &middot; {songs.length} track{songs.length !== 1 ? 's' : ''}
             </Typography>
           </Box>
@@ -146,8 +148,8 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
             onClick={triggerClose}
             sx={{
               cursor: 'pointer',
-              color: 'rgba(255,255,255,0.4)',
-              '&:hover': { color: 'white' },
+              color: 'text.secondary',
+              '&:hover': { color: 'text.primary' },
               display: 'flex',
               alignItems: 'center',
               transition: 'color 0.15s',
@@ -160,35 +162,35 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
         {/* Song list */}
         <Box sx={{ flex: 1, overflow: 'auto', px: 3, py: 2 }}>
           {loading ? (
-            <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, py: 2 }}>Loading...</Typography>
+            <Typography sx={{ color: 'text.secondary', fontSize: 14, py: 2 }}>Loading...</Typography>
           ) : songs.length === 0 ? (
-            <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, py: 2 }}>No songs found.</Typography>
+            <Typography sx={{ color: 'text.secondary', fontSize: 14, py: 2 }}>No songs found.</Typography>
           ) : (
             <>
               {/* Column headers */}
-              <Box sx={{ display: 'flex', alignItems: 'center', pb: 1, mb: 1, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', pb: 1, mb: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Box sx={{ width: 42 }}>
-                  <Typography sx={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  <Typography sx={{ fontSize: 11, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: 1 }}>
                     Visible
                   </Typography>
                 </Box>
                 <Box sx={{ width: 32 }}>
-                  <Typography sx={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+                  <Typography sx={{ fontSize: 11, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                     #
                   </Typography>
                 </Box>
                 <Box sx={{ flex: 1, ml: 1.5 }}>
-                  <Typography sx={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  <Typography sx={{ fontSize: 11, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: 1 }}>
                     Title
                   </Typography>
                 </Box>
                 <Box sx={{ width: 80, ml: 1 }}>
-                  <Typography sx={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  <Typography sx={{ fontSize: 11, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: 1 }}>
                     Hash
                   </Typography>
                 </Box>
                 <Box sx={{ width: 50, textAlign: 'right' }}>
-                  <Typography sx={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  <Typography sx={{ fontSize: 11, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: 1 }}>
                     Time
                   </Typography>
                 </Box>
@@ -210,7 +212,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
                       opacity: isHidden ? 0.4 : 1,
                       transition: 'background 0.15s, opacity 0.15s',
                       '&:hover': {
-                        bgcolor: 'rgba(255,255,255,0.05)',
+                        bgcolor: 'action.hover',
                       },
                     }}
                   >
@@ -220,8 +222,8 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
                         size="small"
                         sx={{
                           p: 0,
-                          color: 'rgba(255,255,255,0.3)',
-                          '&.Mui-checked': { color: '#1db954' },
+                          color: 'text.disabled',
+                          '&.Mui-checked': { color: 'primary.main' },
                         }}
                       />
                     </Box>
@@ -229,7 +231,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
                       width: 32,
                       fontSize: 13,
                       textAlign: 'right',
-                      color: 'rgba(255,255,255,0.4)',
+                      color: 'text.secondary',
                       fontVariantNumeric: 'tabular-nums',
                     }}>
                       {idx + 1}
@@ -237,7 +239,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
                     <Typography sx={{
                       flex: 1,
                       fontSize: 14,
-                      color: isHidden ? 'rgba(255,255,255,0.4)' : 'white',
+                      color: isHidden ? 'text.secondary' : 'text.primary',
                       ml: 1.5,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -250,7 +252,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
                       width: 80,
                       fontSize: 11,
                       ml: 1,
-                      color: 'rgba(255,255,255,0.2)',
+                      color: 'text.disabled',
                       fontFamily: 'monospace',
                     }}>
                       {song.hash?.slice(0, 8)}
@@ -259,7 +261,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
                       width: 50,
                       fontSize: 13,
                       textAlign: 'right',
-                      color: 'rgba(255,255,255,0.4)',
+                      color: 'text.secondary',
                       fontVariantNumeric: 'tabular-nums',
                     }}>
                       {formatDuration(song.duration)}
@@ -275,7 +277,8 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
         <Box sx={{
           px: 3,
           py: 2,
-          borderTop: '1px solid rgba(255,255,255,0.08)',
+          borderTop: '1px solid',
+          borderColor: 'divider',
           display: 'flex',
           justifyContent: 'flex-end',
           gap: 1,
@@ -285,9 +288,9 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
             size="small"
             onClick={triggerClose}
             sx={{
-              color: 'rgba(255,255,255,0.6)',
-              borderColor: 'rgba(255,255,255,0.15)',
-              '&:hover': { borderColor: 'rgba(255,255,255,0.3)', bgcolor: 'rgba(255,255,255,0.05)' },
+              color: 'text.secondary',
+              borderColor: 'divider',
+              '&:hover': { borderColor: 'text.disabled', bgcolor: 'action.hover' },
               textTransform: 'none',
               fontSize: 13,
             }}
@@ -300,9 +303,9 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({ artist, album, open, on
             onClick={handleSave}
             disabled={saving || !hasChanges}
             sx={{
-              bgcolor: '#1db954',
-              '&:hover': { bgcolor: '#1ed760' },
-              '&.Mui-disabled': { bgcolor: 'rgba(29,185,84,0.3)', color: 'rgba(255,255,255,0.4)' },
+              bgcolor: 'primary.main',
+              '&:hover': { bgcolor: 'primary.light' },
+              '&.Mui-disabled': { bgcolor: alpha(theme.palette.primary.main, 0.3), color: 'text.secondary' },
               textTransform: 'none',
               fontSize: 13,
               fontWeight: 600,

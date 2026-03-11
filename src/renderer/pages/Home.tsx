@@ -81,13 +81,13 @@ const ArtistBanner: React.FC<{ item: Extract<ListItem, { type: 'artist-banner' }
         <Typography sx={{
           fontSize: 48,
           fontWeight: 800,
-          color: 'white',
+          color: 'text.primary',
           textShadow: '0 2px 16px rgba(0,0,0,0.7)',
           lineHeight: 1.1,
         }}>
           {item.artist}
         </Typography>
-        <Typography sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', mt: 1 }}>
+        <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 1 }}>
           {item.songCount} songs
           {' \u00B7 '}
           {item.albumCount} album{item.albumCount !== 1 ? 's' : ''}
@@ -203,8 +203,8 @@ const Home = () => {
         height: '100%',
         gap: 2,
       }}>
-        <CircularProgress sx={{ color: '#1db954' }} />
-        <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>
+        <CircularProgress sx={{ color: 'primary.main' }} />
+        <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
           Loading your library...
         </Typography>
       </Box>
@@ -221,15 +221,15 @@ const Home = () => {
         height: '100%',
         gap: 1,
       }}>
-        <Box sx={{ color: 'rgba(255,255,255,0.2)', mb: 1 }}>
+        <Box sx={{ color: 'text.disabled', mb: 1 }}>
           <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
           </svg>
         </Box>
-        <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 18, fontWeight: 600 }}>
+        <Typography sx={{ color: 'text.secondary', fontSize: 18, fontWeight: 600 }}>
           {searchQuery ? 'No results found' : 'Your library is empty'}
         </Typography>
-        <Typography sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>
+        <Typography sx={{ color: 'text.disabled', fontSize: 14 }}>
           {searchQuery ? 'Try a different search' : 'Add music files to your Music folder and restart'}
         </Typography>
       </Box>

@@ -40,11 +40,11 @@ const MenuItem: React.FC<{ label: string; onClick: () => void }> = ({ label, onC
       py: 0.75,
       cursor: 'pointer',
       '&:hover': {
-        bgcolor: 'rgba(255,255,255,0.1)',
+        bgcolor: 'action.selected',
       },
     }}
   >
-    <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>{label}</Typography>
+    <Typography sx={{ fontSize: 13, color: 'text.primary' }}>{label}</Typography>
   </Box>
 );
 
@@ -125,12 +125,13 @@ const SongContextMenu: React.FC = () => {
         left: x,
         top: y,
         zIndex: 9999,
-        bgcolor: '#282828',
+        bgcolor: 'background.paper',
         borderRadius: 1,
         py: 0.5,
         minWidth: 180,
         boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
-        border: '1px solid rgba(255,255,255,0.1)',
+        border: '1px solid',
+        borderColor: 'divider',
       }}
     >
       <MenuItem label="Play" onClick={handlePlay} />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Box, Button, Typography, IconButton } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import { toggleFullscreen } from '../api/api';
 import { isElectron } from '../utils/platform';
 import { getApiBase, setApiBase, setAuthToken } from '../types/song';
@@ -101,6 +102,7 @@ const Settings = () => {
 // --- Desktop: Connected Devices Section ---
 
 const ConnectedDevicesSection = () => {
+  const theme = useTheme();
   const [devices, setDevices] = useState<RegisteredDeviceInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -155,13 +157,14 @@ const ConnectedDevicesSection = () => {
         </Typography>
       ) : devices.length === 0 ? (
         <Box sx={{
-          bgcolor: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          bgcolor: 'action.hover',
+          border: '1px solid',
+          borderColor: 'divider',
           borderRadius: 2,
           p: 3,
           textAlign: 'center',
         }}>
-          <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
             No devices have connected yet. Use the "Connect a device" button to pair a mobile device.
           </Typography>
         </Box>
@@ -175,27 +178,28 @@ const ConnectedDevicesSection = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 2,
-                  bgcolor: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  bgcolor: 'action.hover',
+                  border: '1px solid',
+                  borderColor: 'divider',
                   borderRadius: 2,
                   px: 2,
                   py: 1.5,
                   '&:hover': {
-                    bgcolor: 'rgba(255,255,255,0.05)',
+                    bgcolor: 'action.selected',
                   },
                 }}
               >
                 {/* Device icon */}
-                <Box sx={{ color: 'rgba(255,255,255,0.5)', display: 'flex' }}>
+                <Box sx={{ color: 'text.secondary', display: 'flex' }}>
                   <DeviceTypeIcon type={device.type} />
                 </Box>
 
                 {/* Device info */}
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'white' }}>
+                  <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary' }}>
                     {device.name}
                   </Typography>
-                  <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
                     Paired {formatDate(device.firstSeen)} &middot; Last seen {formatLastSeen(device.lastSeen)}
                   </Typography>
                 </Box>
@@ -205,8 +209,8 @@ const ConnectedDevicesSection = () => {
                   size="small"
                   onClick={() => handleRevoke(device.id)}
                   sx={{
-                    color: 'rgba(255,255,255,0.3)',
-                    '&:hover': { color: '#ff5252', bgcolor: 'rgba(255,82,82,0.1)' },
+                    color: 'text.disabled',
+                    '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) },
                   }}
                   title="Revoke device"
                 >
@@ -223,11 +227,11 @@ const ConnectedDevicesSection = () => {
               onClick={handleRevokeAll}
               sx={{
                 mt: 2,
-                color: '#ff5252',
-                borderColor: 'rgba(255,82,82,0.3)',
+                color: 'error.main',
+                borderColor: alpha(theme.palette.error.main, 0.3),
                 '&:hover': {
-                  borderColor: '#ff5252',
-                  bgcolor: 'rgba(255,82,82,0.08)',
+                  borderColor: 'error.main',
+                  bgcolor: alpha(theme.palette.error.main, 0.08),
                 },
                 textTransform: 'none',
                 fontSize: 13,
@@ -245,6 +249,7 @@ const ConnectedDevicesSection = () => {
 // --- Mobile: Scan QR code to connect to desktop ---
 
 const MobileScanSection = () => {
+  const theme = useTheme();
   const [scanning, setScanning] = useState(false);
   const [connected, setConnected] = useState(!!localStorage.getItem('opentunes_auth_token'));
   const [error, setError] = useState('');
@@ -332,13 +337,13 @@ const MobileScanSection = () => {
 
       {connected && (
         <Box sx={{
-          bgcolor: 'rgba(29, 185, 84, 0.1)',
-          border: '1px solid rgba(29, 185, 84, 0.3)',
+          bgcolor: alpha(theme.palette.primary.main, 0.1),
+          border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
           borderRadius: 1,
           p: 2,
           mb: 2,
         }}>
-          <Typography sx={{ color: '#1db954', fontSize: 14 }}>
+          <Typography sx={{ color: 'primary.main', fontSize: 14 }}>
             Connected to {getApiBase()}
           </Typography>
         </Box>
