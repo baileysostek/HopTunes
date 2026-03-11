@@ -8,7 +8,7 @@ Currently, the Electron host owns all music — it runs the Express server, SQLi
 
 ## Phase 1: Shared Types & Protocol Extension
 
-**No runtime behavior changes — just define the foundation.**
+**Define the foundation. The database refactor is behavior-preserving — same queries, same results, just extracted into a shared module.**
 
 ### `src/shared/types.ts` — Extend existing types
 
@@ -32,6 +32,61 @@ Currently, the Electron host owns all music — it runs the Express server, SQLi
 - Extend `ServerWsMessage` with:
   - `request-audio` — host asks edge device for a file
   - `request-art` — host asks edge device for album art
+
+### Refactor: Shared database layer — `src/shared/db-schema.ts`
+
+Extract reusable database code from `src/main/database.ts` into a shared module:
+
+```typescript
+// --- Shared types (already exists as SongRow, moved here) ---
+export interface SongRow {
+  id: number;
+  file_path: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number | null;
+  has_art: number;
+  track_number: number;
+  file_modified_at: number;
+  hash: string;
+  hidden: number;
+}
+
+// --- Shared SQL constants ---
+export const CREATE_SONGS_TABLE = `CREATE TABLE IF NOT EXISTS songs (...)`;  // exact same schema
+export const CREATE_MEDIA_LOCATIONS_TABLE = `...`;
+export const UPSERT_SONG_SQL = `INSERT INTO songs (...) ON CONFLICT(file_path) DO UPDATE SET ...`;
+export const GET_ALL_SONGS_SQL = `SELECT * FROM songs WHERE hidden = 0 ORDER BY ...`;
+export const MARK_DUPLICATES_SQL = `UPDATE songs SET hidden = 1 WHERE ...`;
+// ... all other SQL strings as named constants
+
+// --- Abstract adapter interface ---
+export interface DatabaseAdapter {
+  upsertSong(song: Omit<SongRow, 'id' | 'hidden'>): Promise<void>;
+  getAllSongs(includeHidden?: boolean): Promise<SongRow[]>;
+  markDuplicatesHidden(): Promise<number>;
+  hideSongByPath(filePath: string): Promise<void>;
+  getSongModifiedAt(filePath: string): Promise<number | null>;
+  removeDeletedSongs(existingPaths: Set<string>): Promise<number>;
+  getMediaLocations(): Promise<string[]>;
+  addMediaLocation(path: string): Promise<void>;
+  removeMediaLocation(path: string): Promise<void>;
+}
+```
+
+**Host** (`src/main/database.ts`) — refactored to implement `DatabaseAdapter` using `sqlite3` (Node.js native). Keeps host-only tables (`artist_images`, `album_art`).
+
+**Edge** (`src/renderer/services/edgeDatabase.ts`) — new, implements same `DatabaseAdapter` using `@capacitor-community/sqlite` (native SQLite on Android). Only creates `songs` + `media_locations` tables.
+
+**New dependency**: `npm install @capacitor-community/sqlite` + sync to Android project via `npx cap sync`.
+
+**Benefits**:
+- Same `SongRow` type on both sides
+- Same SQL queries — no drift between host and edge schemas
+- Same incremental indexing logic (`file_modified_at` change detection)
+- Same dedup logic (`markDuplicatesHidden`)
+- Edge gets real SQLite (via `@capacitor-community/sqlite`) — persistent, queryable, fast
 
 ### New: `src/shared/federation.ts` — Pure merge/dedup functions
 
@@ -61,24 +116,67 @@ In-memory state manager on the host:
 - `registerEdgeLibrary(deviceId, deviceName, ws, songs)` — store an edge device's library
 - `unregisterEdgeDevice(deviceId)` — mark device's songs as unavailable
 - `getUnifiedLibrary(): Song[]` — merge host SQLite songs + all edge libraries, dedup, sort
-- `requestAudioFromEdge(deviceId, localPath): Promise<string>` — request file, cache to disk, return cache path
+- `streamAudioFromEdge(deviceId, localPath, httpRes): Promise<void>` — stream-as-it-arrives: pipes WS binary frames to HTTP response + temp cache file simultaneously
 - `requestArtFromEdge(deviceId, localPath): Promise<Buffer | null>` — request embedded art
+- `getAudioCachePath(deviceId, localPath): string | null` — returns cache path if file was previously streamed, null otherwise
 
-**Cache-on-demand reverse streaming:**
+**Stream-as-it-arrives reverse streaming — `streamAudioFromEdge()` implementation:**
 
-1. `GET /api/audio/remote/:deviceId/:file` hits the host
-2. Check `<userData>/edge-cache/<deviceId>/` for cached copy
-3. If cached → serve with existing range-request streaming logic
-4. If not cached:
-   - Send `{ type: 'request-audio', requestId, localPath }` to edge device via WebSocket
-   - Edge device reads file, sends binary WebSocket frames back
-   - Host writes to temp file → moves to cache → serves
-   - 30-second timeout → 503 if edge device doesn't respond
-5. Dedup pending requests (same deviceId+path piggybacks on existing transfer)
+```typescript
+async streamAudioFromEdge(deviceId: string, localPath: string, httpRes: Response): Promise<void> {
+  const device = this.edgeDevices.get(deviceId);
+  if (!device?.ws) throw new Error('Device offline');
 
-**Why cache-on-demand, not real-time proxy:** WebSocket is a message protocol, not a streaming protocol. Proxying HTTP Range semantics through WebSocket would be extremely complex. Caching the full file first is dramatically simpler. After first play, songs stream instantly from local disk. Tradeoff: ~3s delay on first play for a 10MB MP3 on 100Mbps WiFi.
+  // Dedup: if another request for the same file is in-flight, piggyback on it
+  const key = `${deviceId}:${localPath}`;
+  if (this.pendingStreams.has(key)) {
+    // Wait for the other transfer to finish, then serve from cache
+    await this.pendingStreams.get(key);
+    return serveLocalAudioFile(this.getCachePath(deviceId, localPath), httpRes);
+  }
 
-**Why in-memory, not SQLite:** Edge libraries are transient. Persisting creates stale-data problems when devices change their library offline. Memory cost is ~2MB per 10k songs — negligible.
+  const requestId = crypto.randomUUID();
+  const passThrough = new PassThrough();
+  const tempPath = path.join(this.cacheDir, `${requestId}.tmp`);
+  const fileStream = fs.createWriteStream(tempPath);
+
+  // 1. Send request to edge device
+  device.ws.send(JSON.stringify({ type: 'request-audio', requestId, localPath }));
+
+  // 2. Wait for metadata frame (mimeType, fileSize) — 30s timeout
+  const meta = await this.waitForMeta(requestId, 30000);
+
+  // 3. Set HTTP headers and start piping immediately
+  httpRes.writeHead(200, {
+    'Content-Type': meta.mimeType,
+    'Content-Length': meta.fileSize,
+  });
+  passThrough.pipe(httpRes);     // → audio starts playing on first chunk
+  passThrough.pipe(fileStream);  // → cache builds up on disk
+
+  // 4. Route incoming binary WS frames to the PassThrough stream
+  //    (federation.ts registers a temporary binary handler for this requestId)
+  //    Each frame: passThrough.write(chunk)
+  //    Final frame (empty): passThrough.end()
+
+  // 5. On complete: rename temp file to permanent cache path
+  //    On error (WS drops mid-transfer): destroy streams, delete temp, abort HTTP response
+}
+```
+
+**Key implementation details:**
+- `PassThrough` stream is the bridge between WebSocket binary frames and HTTP response + file write
+- Backpressure handled naturally by Node.js stream piping
+- If WS disconnects mid-transfer: `passThrough.destroy(err)` propagates to both HTTP response and file stream, temp file gets cleaned up
+- Pending stream map (`Map<key, Promise>`) prevents duplicate transfers — second requester waits then serves from cache
+- **One active stream per device WS connection at a time.** Binary frames from a device are always routed to that device's active stream request. If a second song from the same device is requested concurrently, it queues behind the first.
+- Cache location: `<userData>/edge-cache/<deviceId>/<sha256(localPath)>.ext`
+- Subsequent plays hit cache → served with full HTTP Range support (seeking works)
+- `serveLocalAudioFile()` — extract from existing audio streaming logic in `routes/library.ts` (the code that handles `fs.stat`, Range headers, `fs.createReadStream`). Reused for both host files and cached edge files.
+
+**Why stream-as-it-arrives:** Audio begins playing within ~200-500ms on LAN (first ~64KB chunk), instead of waiting for the full file. The file is still fully cached for future plays with Range/seek support.
+
+**Why in-memory edge library storage on the host (not SQLite):** Edge libraries are transient — the device is the authoritative source. Persisting on the host creates stale-data problems when devices change their library offline. Memory cost is ~2MB per 10k songs — negligible.
 
 ### Modify: `src/main/index.ts` — WebSocket message routing
 
@@ -90,13 +188,37 @@ In-memory state manager on the host:
 
 ### Modify: `src/main/routes/library.ts`
 
-- Add routes: `GET /api/audio/remote/:deviceId/:file` and `GET /api/art/remote/:deviceId/:file`
 - Change `GET /api/library` to return `federation.getUnifiedLibrary()`
 - Change all library broadcast points (reindex, hide, set-hidden) to use unified library
+- Add `GET /api/art/remote/:deviceId/:file` — delegates to `federation.requestArtFromEdge()`
+- Add `GET /api/audio/remote/:deviceId/:file` — stream-as-it-arrives implementation:
+
+  ```typescript
+  router.get('/api/audio/remote/:deviceId/:file', async (req, res) => {
+    const { deviceId, file } = req.params;
+    const localPath = decodeURIComponent(file);
+
+    // 1. Check cache first — if hit, serve with full Range support (existing streaming logic)
+    const cachePath = federation.getAudioCachePath(deviceId, localPath);
+    if (cachePath) {
+      return serveLocalAudioFile(cachePath, req, res);  // reuse existing range-request logic
+    }
+
+    // 2. Cache miss — stream-as-it-arrives from edge device
+    //    Creates a PassThrough stream, sends WS request to edge device,
+    //    pipes incoming binary frames to both HTTP response and temp file.
+    //    First play: no Range support (linear stream). Subsequent plays: full Range via cache.
+    try {
+      await federation.streamAudioFromEdge(deviceId, localPath, res);
+    } catch (err) {
+      if (!res.headersSent) res.status(503).json({ error: 'Edge device unavailable' });
+    }
+  });
+  ```
 
 ---
 
-## Phase 3: Android MediaStore Scanner (Capacitor Plugin)
+## Phase 3: Android MediaStore Scanner + Local Library + Offline Playback
 
 ### Modify: `android/app/src/main/AndroidManifest.xml`
 
@@ -124,37 +246,97 @@ Capacitor plugin (follows existing `MediaControlsPlugin` pattern):
 
 Client-side orchestrator (only initializes on Capacitor via `isCapacitor()` check):
 
-- On init: call `LocalLibrary.scanLibrary()` → convert to `EdgeSongMeta[]` → send `edge-library` WS message
-- Handle incoming `request-audio`: read file via `LocalLibrary.getFileBytes()`, send binary frames back over WebSocket
-- Handle incoming `request-art`: read art via `LocalLibrary.getEmbeddedArt()`, send base64 back
+- **Persistent local library**: Uses the same SQLite schema as the host (via `@capacitor-community/sqlite` + shared `DatabaseAdapter` interface). Survives app restart, available offline.
+- **Media location management**: Users can add/remove local music folders via the same `media_locations` table — identical to the host's media locations feature
+- On init: load persisted local library from local SQLite → display immediately (offline-ready)
+- Then re-scan configured media locations (using same `file_modified_at` change detection as host indexer) → update local SQLite → if connected, send `edge-library` WS message to host
+- Handle incoming `request-audio` from host (via playerStore WS message routing):
+  1. Send JSON metadata frame: `{ type: 'edge-audio-response', requestId, mimeType, fileSize }`
+  2. Call `LocalLibrary.getFileBytes(localPath)` which reads the file in ~64KB chunks
+  3. Send each chunk as a binary WebSocket frame via `ws.send(binaryData)`
+  4. Send an empty binary frame to signal completion
+  - `localLibrary.ts` needs a reference to the active WebSocket (passed from playerStore on init or via a setter)
+- Handle incoming `request-art`: call `LocalLibrary.getEmbeddedArt()`, send `{ type: 'edge-art-response', requestId, data: base64 }` as JSON
 - Re-scan on app foreground (`visibilitychange` event) if >5 minutes since last scan
+- Export `getLocalFileUrl(localPath)` for direct local playback
 
 ### Modify: `src/renderer/store/playerStore.ts`
 
 - In WS message handler, route `request-audio` and `request-art` to `localLibrary` service
+- **Dual-mode playback** — the edge device operates in two modes:
 
-### Data flow: Edge library sync
+  | | Connected to Host | Disconnected |
+  |---|---|---|
+  | **Library shown** | Unified library from host (already deduped) | Local songs only (from SQLite (via `@capacitor-community/sqlite`)) |
+  | **Playback control** | Through host API (existing behavior) | Local — edge device drives audio directly from file |
+  | **Audio source for host songs** | Stream from host (existing) | Unavailable (grayed out in UI) |
+  | **Audio source for local songs** | Play locally via `Capacitor.convertFileSrc()` (shortcut, no round-trip) | Play locally via `Capacitor.convertFileSrc()` |
+
+- Mode switches automatically based on WebSocket connection status
+- On disconnect: if currently playing a host-only song → pause. If playing a local song → continue uninterrupted
+- On reconnect: re-send local library to host, host broadcasts updated unified library
+
+### Modify: `src/renderer/store/libraryStore.ts`
+
+- When connected: `songs` = unified library from host (already contains local songs, deduped)
+- When disconnected: `songs` = local library from SQLite (via `@capacitor-community/sqlite`)
+- Transition is seamless — the libraryStore swaps its source on connection state change
+
+### Deduplication strategy
+
+Dedup happens **only on the host** (in `src/shared/federation.ts`). The host merges all libraries and removes duplicates before broadcasting. The edge device never needs to dedup locally because:
+- When connected: the host already deduped the unified library it sent
+- When disconnected: only local songs are shown — nothing to dedup against
+
+Dedup rules:
+1. **Hash match** (primary): Same SHA256 = same song. Keep host copy, suppress edge copy.
+2. **Metadata match** (fallback, when hash unavailable): title + artist + |durationA - durationB| < 2s. Keep host copy.
+3. Edge-to-edge dedup: If two edge devices have the same song, keep the copy from the device that announced first.
+
+### Data flow: Edge library sync (connected)
 
 ```
 Android app boots
-  → localLibrary.init() → LocalLibrary.scanLibrary() (queries MediaStore)
-  → Sends WS: { type: 'edge-library', deviceId, songs: EdgeSongMeta[] }
+  → localLibrary.init()
+  → Load persisted songs from SQLite (via `@capacitor-community/sqlite`) → display immediately in libraryStore
+  → LocalLibrary.scanLibrary() (queries MediaStore) → update SQLite (via `@capacitor-community/sqlite`)
+  → If connected: send WS { type: 'edge-library', deviceId, songs: EdgeSongMeta[] }
   → Host: federation.registerEdgeLibrary()
-  → Host: getUnifiedLibrary() merges host + edge songs
+  → Host: getUnifiedLibrary() merges host + all edge songs, deduplicates
   → Host: broadcastToClients({ type: 'library', data: unifiedSongs })
-  → All clients see the merged library
+  → Edge device: libraryStore swaps to unified library from host
+  → All clients see the merged, deduplicated library
 ```
 
-### Data flow: Reverse audio streaming
+### Data flow: Offline local playback
 
 ```
-User clicks play on edge-device song
+Android app boots (no host connection)
+  → localLibrary.init() → load songs from SQLite (via `@capacitor-community/sqlite`)
+  → libraryStore shows local songs only
+  → User taps play on a local song
+  → playerStore (offline mode): plays directly via Capacitor.convertFileSrc(localPath)
+  → No host API calls — fully autonomous playback
+  → Queue, skip, seek all handled locally
+```
+
+### Data flow: Reverse audio streaming (host plays edge song)
+
+```
+User clicks play on edge-device song from desktop
   → POST /api/playback/play → state broadcast → active device loads audio
   → GET /api/audio/remote/<deviceId>/<path>
-  → Host checks cache → miss
-  → Host sends WS { type: 'request-audio', requestId, localPath } to edge device
-  → Edge reads file → sends binary WS frames → Host writes to cache
-  → Host serves cached file with Range support
+  → Host route handler checks cache → hit? serve from disk with Range support. Done.
+  → Cache miss — stream-as-it-arrives:
+    1. Host sends WS { type: 'request-audio', requestId, localPath } to edge device
+    2. Edge device reads file, sends metadata frame { mimeType, fileSize }
+    3. Host sets HTTP headers (Content-Type, Content-Length) and begins response
+    4. Edge sends binary WS frames (~64KB chunks)
+    5. Host pipes each chunk simultaneously to:
+       a. HTTP response → audio element starts playing (~200-500ms after step 1)
+       b. Temp file on disk → building cache
+    6. Edge sends final chunk → Host moves temp file to edge-cache/ → done
+    7. Next play of same song → cache hit → full Range/seek support
 ```
 
 ---
@@ -187,9 +369,7 @@ When the active playback device IS the device that owns the song → play direct
 
 **Modify: `src/renderer/services/localLibrary.ts`** — Add `getLocalFileUrl(localPath): string`
 
-### Modify: `src/main/routes/library.ts`
-
-- Remote audio route: check device online status. If offline but cached → serve cache. If offline and not cached → 503.
+**Note on `routes/library.ts`**: The Phase 2 route handler already handles the offline case — `streamAudioFromEdge` throws if the device WS is gone, and the catch block returns 503. Phase 4 adds the explicit fast-path: if `!federation.isDeviceOnline(deviceId)`, check cache immediately and skip the 503 without attempting a WS request. This avoids a wasted timeout for a device that's known to be offline.
 
 ---
 
@@ -223,29 +403,32 @@ After initial fast sync (metadata only), compute hashes in background:
 
 ## File Summary
 
-### New files (4)
+### New files (6)
 
 | File | Purpose |
 |------|---------|
+| `src/shared/db-schema.ts` | Shared `SongRow` type, SQL constants, `DatabaseAdapter` interface |
 | `src/shared/federation.ts` | Pure merge/dedup functions |
 | `src/main/federation.ts` | Host-side federation state manager + cache |
-| `src/renderer/services/localLibrary.ts` | Client-side scanning + reverse streaming handler |
+| `src/renderer/services/edgeDatabase.ts` | `DatabaseAdapter` implementation using `@capacitor-community/sqlite` |
+| `src/renderer/services/localLibrary.ts` | Client-side scanning, local playback, reverse streaming handler |
 | `android/.../LocalLibraryPlugin.java` | Capacitor plugin for MediaStore + file access |
 
-### Modified files (10)
+### Modified files (11)
 
 | File | Changes |
 |------|---------|
 | `src/shared/types.ts` | `Song.origin`, `EdgeSongMeta`, new WS message types |
+| `src/main/database.ts` | Refactored: implements shared `DatabaseAdapter`, imports SQL from `db-schema.ts` |
 | `src/main/index.ts` | WS routing for edge messages + binary frames, unified welcome |
 | `src/main/routes/library.ts` | Remote audio/art routes, unified library broadcasts |
 | `src/main/playback.ts` | `handleSongSourceLost()` for failover |
-| `src/renderer/store/playerStore.ts` | Route new WS messages, local playback shortcut |
+| `src/renderer/store/playerStore.ts` | Route new WS messages, dual-mode playback (connected vs offline) |
+| `src/renderer/store/libraryStore.ts` | Swap between unified (connected) and local-only (offline) library source |
 | `android/.../AndroidManifest.xml` | `READ_MEDIA_AUDIO` + `READ_EXTERNAL_STORAGE` |
 | `android/.../MainActivity.java` | Register `LocalLibraryPlugin` |
 | `src/renderer/components/` (various) | Origin indicators, availability UI |
-| `src/renderer/components/Sidebar.tsx` | Device sources section |
-| `src/renderer/components/SettingsModal.tsx` | Federation settings |
+| `src/renderer/components/SettingsModal.tsx` | Federation settings + local media location management on edge |
 
 ### Unchanged (no modifications needed)
 
@@ -280,8 +463,10 @@ Phases 1+2 = minimum testable feature (mock edge data). Phase 3 = real on Androi
 ## Verification Plan
 
 1. **Phase 1-2**: Unit test `mergeLibraries()` and `deduplicateSongs()` with mock data. Manually inject fake edge library via WebSocket client tool. Confirm unified library appears on desktop.
-2. **Phase 3**: Build and deploy to Android device. Confirm `READ_MEDIA_AUDIO` permission prompt appears. Verify `scanLibrary()` returns local songs. Verify edge library appears in host's unified library.
-3. **Reverse streaming**: Play an edge-only song from the desktop. Confirm audio streams successfully after initial cache delay. Confirm subsequent plays are instant (cached).
-4. **Availability**: Disconnect Android device. Confirm edge songs marked unavailable. Confirm playback auto-skips unavailable songs. Reconnect device. Confirm songs become available again.
-5. **Local shortcut**: On Android, play a song that exists on that device. Confirm it plays locally without hitting the host's audio endpoint.
-6. **Dedup**: Add the same song to both host and Android. Confirm only one copy appears in the library (host copy preferred).
+2. **Phase 3 — Local library**: Build and deploy to Android device. Confirm `READ_MEDIA_AUDIO` permission prompt appears. Add a local music folder in Settings. Verify songs appear in library.
+3. **Phase 3 — Offline playback**: Disconnect from host (airplane mode or kill host). Confirm library shows local songs only. Play, pause, skip, seek — all work without host.
+4. **Phase 3 — Reconnect**: Reconnect to host. Confirm library seamlessly switches to unified view (host + local, deduplicated). Confirm host also sees the edge device's songs.
+5. **Reverse streaming**: Play an edge-only song from the desktop. Confirm audio begins playing within ~1s (stream-as-it-arrives, no full-download wait). Confirm subsequent plays are instant with seek support (cached).
+6. **Availability**: Disconnect Android device. Confirm edge songs on host marked unavailable. Confirm playback auto-skips unavailable songs. Reconnect device. Confirm songs become available again.
+7. **Local playback shortcut**: On Android (connected to host), play a song that exists locally. Confirm it plays directly from local file (no network traffic to host for audio).
+8. **Dedup**: Add the same song to both host and Android. Confirm only one copy appears in the unified library (host copy preferred). Confirm when disconnected, the local copy still shows and plays.
