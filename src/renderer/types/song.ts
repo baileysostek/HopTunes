@@ -1,12 +1,5 @@
-export interface Song {
-  title: string;
-  artist: string;
-  album: string;
-  duration: number | null;
-  trackNumber: number;
-  path: string;
-  art: string | null;
-}
+// Re-export the canonical Song type from the shared package
+export type { Song } from '../../shared/types';
 
 const DEFAULT_API_BASE = 'http://127.0.0.1:3000';
 const STORAGE_KEY = 'opentunes_server_url';
@@ -44,6 +37,3 @@ export function getMediaUrl(path: string): string {
   const sep = base.includes('?') ? '&' : '?';
   return `${base}${sep}token=${encodeURIComponent(token)}`;
 }
-
-/** @deprecated Use getApiBase() for dynamic server URL support */
-export const API_BASE = DEFAULT_API_BASE;

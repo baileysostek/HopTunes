@@ -1,31 +1,15 @@
-export interface SongInfo {
-  title: string;
-  artist: string;
-  album: string;
-  duration: number | null;
-  trackNumber: number;
-  path: string;
-  art: string | null;
-}
+import {
+  Song,
+  DeviceInfo,
+  PlaybackState,
+  ServerPlaybackState,
+} from '../shared/types';
 
-export interface DeviceInfo {
-  id: string;
-  name: string;
-  type: 'desktop' | 'mobile' | 'web';
-  lastSeen: number;
-}
-
-export interface PlaybackState {
-  currentSong: SongInfo | null;
-  status: 'playing' | 'paused' | 'stopped';
-  position: number;       // seconds into the current song
-  updatedAt: number;      // Date.now() when position was last set
-  queue: SongInfo[];
-  history: SongInfo[];
-}
+// Re-export shared types so existing imports from './playback' still work
+export type { Song as SongInfo, DeviceInfo };
 
 const MAX_HISTORY = 100;
-const DEVICE_TIMEOUT = 30000; // Remove devices not seen in 30s
+const DEVICE_TIMEOUT = 10000; // Remove devices not seen in 10s
 
 const state: PlaybackState = {
   currentSong: null,
@@ -103,14 +87,14 @@ function estimatedPosition(): number {
   return state.position;
 }
 
-function pushToHistory(song: SongInfo): void {
+function pushToHistory(song: Song): void {
   state.history.push(song);
   if (state.history.length > MAX_HISTORY) {
     state.history = state.history.slice(-MAX_HISTORY);
   }
 }
 
-export function getPlaybackState(): PlaybackState & { estimatedPosition: number; activeDeviceId: string | null; devices: DeviceInfo[] } {
+export function getPlaybackState(): ServerPlaybackState {
   pruneStaleDevices();
   return {
     ...state,
@@ -122,7 +106,7 @@ export function getPlaybackState(): PlaybackState & { estimatedPosition: number;
   };
 }
 
-export function play(song: SongInfo): void {
+export function play(song: Song): void {
   if (state.currentSong && state.currentSong.path !== song.path) {
     pushToHistory(state.currentSong);
   }
@@ -132,7 +116,7 @@ export function play(song: SongInfo): void {
   state.updatedAt = Date.now();
 }
 
-export function playWithQueue(song: SongInfo, queue: SongInfo[]): void {
+export function playWithQueue(song: Song, queue: Song[]): void {
   if (state.currentSong && state.currentSong.path !== song.path) {
     pushToHistory(state.currentSong);
   }
@@ -166,7 +150,7 @@ export function seek(positionSeconds: number): void {
   state.updatedAt = Date.now();
 }
 
-export function skipNext(): SongInfo | null {
+export function skipNext(): Song | null {
   if (state.currentSong) {
     pushToHistory(state.currentSong);
   }
@@ -182,7 +166,7 @@ export function skipNext(): SongInfo | null {
   return next;
 }
 
-export function skipPrev(): SongInfo | null {
+export function skipPrev(): Song | null {
   const prev = state.history.pop() || null;
   if (prev) {
     // Push current song back to front of queue
@@ -199,15 +183,15 @@ export function skipPrev(): SongInfo | null {
 
 // Queue operations
 
-export function addToQueue(song: SongInfo): void {
+export function addToQueue(song: Song): void {
   state.queue.push(song);
 }
 
-export function addToQueueNext(song: SongInfo): void {
+export function addToQueueNext(song: Song): void {
   state.queue.unshift(song);
 }
 
-export function removeFromQueue(index: number): SongInfo | null {
+export function removeFromQueue(index: number): Song | null {
   if (index < 0 || index >= state.queue.length) return null;
   return state.queue.splice(index, 1)[0];
 }

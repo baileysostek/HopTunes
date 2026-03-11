@@ -1,8 +1,12 @@
 import { create } from 'zustand';
 import axios from 'axios';
 import { Song, getApiBase, getAuthToken, getMediaUrl, clearConnection } from '../types/song';
+import { DeviceInfo, DeviceType, ServerPlaybackState, ServerWsMessage } from '../../shared/types';
 import { isElectron } from '../utils/platform';
 import { useLibraryStore } from './libraryStore';
+
+// Re-export so components can import from the store
+export type { DeviceInfo };
 
 let audio: HTMLAudioElement | null = null;
 
@@ -27,36 +31,16 @@ function getDeviceId(): string {
 
 function getDeviceName(): string {
   if (isElectron()) return 'Desktop';
-  // Try to use a meaningful name for mobile
   const ua = navigator.userAgent;
   if (/Android/i.test(ua)) return 'Android';
   if (/iPhone|iPad/i.test(ua)) return 'iOS';
   return 'Browser';
 }
 
-function getDeviceType(): 'desktop' | 'mobile' | 'web' {
+function getDeviceType(): DeviceType {
   if (isElectron()) return 'desktop';
   if (/Android|iPhone|iPad/i.test(navigator.userAgent)) return 'mobile';
   return 'web';
-}
-
-export interface DeviceInfo {
-  id: string;
-  name: string;
-  type: 'desktop' | 'mobile' | 'web';
-  lastSeen: number;
-}
-
-interface ServerPlaybackState {
-  currentSong: Song | null;
-  status: 'playing' | 'paused' | 'stopped';
-  position: number;
-  updatedAt: number;
-  queue: Song[];
-  history: Song[];
-  estimatedPosition: number;
-  activeDeviceId: string | null;
-  devices: DeviceInfo[];
 }
 
 interface PlayerState {
@@ -161,9 +145,9 @@ function applyServerState(
   }
 
   // If this device is missing from the server's device list, mark as
-  // unregistered so the next poll cycle (or an immediate call) re-registers it.
-  // This makes the system self-healing regardless of why the device was pruned.
-  if (server.devices.length > 0 && !server.devices.some(d => d.id === deviceId)) {
+  // unregistered so we re-register immediately. This makes the system
+  // self-healing regardless of why the device was pruned.
+  if (!server.devices.some(d => d.id === deviceId)) {
     registered = false;
   }
 
@@ -385,6 +369,13 @@ if (typeof window !== 'undefined') {
   let wsConnected = false;
   let revoked = false; // true when the host revokes this device
   let activeWs: WebSocket | null = null; // reference for clean shutdown
+  let reconnectDelay = 1000; // Exponential backoff: 1s → 2s → 4s → max 5s
+  const MAX_RECONNECT_DELAY = 5000;
+
+  function scheduleReconnect() {
+    setTimeout(connectWebSocket, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+  }
 
   function connectWebSocket() {
     const base = getApiBase().replace(/^http/, 'ws');
@@ -403,33 +394,60 @@ if (typeof window !== 'undefined') {
         console.log('[OpenTunes] WebSocket connection timed out, retrying...');
         settled = true;
         ws.close();
-        setTimeout(connectWebSocket, 1000);
+        scheduleReconnect();
       }
     }, 5000);
+
+    let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
     ws.addEventListener('open', () => {
       clearTimeout(connectTimeout);
       console.log('[OpenTunes] WebSocket connected');
       wsConnected = true;
-      // (Re-)register on every connect — server may have restarted
+      reconnectDelay = 1000; // Reset backoff on successful connect
+      // Re-register via HTTP — the server's welcome message handles state + library,
+      // but HTTP registration is needed for local (desktop) clients whose device ID
+      // isn't known from the WebSocket connection alone.
       registerThisDevice();
-      // Re-fetch the music library — it may have failed on initial load
-      // if the host wasn't running yet
-      useLibraryStore.getState().fetchLibrary();
+
+      // Send periodic heartbeats so the server doesn't prune this device
+      // from the playback device list (DEVICE_TIMEOUT is 10s on the server).
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'heartbeat', deviceId }));
+        }
+      }, 5000);
     });
 
     ws.addEventListener('message', async (event) => {
       try {
-        // On some platforms (Android WebView), data may arrive as a Blob
         const text = typeof event.data === 'string'
           ? event.data
           : await (event.data as Blob).text();
-        const serverState = JSON.parse(text);
-        applyServerState(
-          serverState,
-          usePlayerStore.setState.bind(usePlayerStore),
-          usePlayerStore.getState
-        );
+        const msg = JSON.parse(text) as ServerWsMessage;
+
+        switch (msg.type) {
+          case 'welcome':
+            applyServerState(
+              msg.state,
+              usePlayerStore.setState.bind(usePlayerStore),
+              usePlayerStore.getState
+            );
+            useLibraryStore.setState({ songs: msg.library, loading: false });
+            registered = true;
+            break;
+          case 'state':
+            applyServerState(
+              msg.data,
+              usePlayerStore.setState.bind(usePlayerStore),
+              usePlayerStore.getState
+            );
+            break;
+          case 'library':
+            useLibraryStore.setState({ songs: msg.data, loading: false });
+            break;
+        }
       } catch {
         // Ignore malformed messages
       }
@@ -438,6 +456,7 @@ if (typeof window !== 'undefined') {
     ws.addEventListener('close', (event) => {
       clearTimeout(connectTimeout);
       wsConnected = false;
+      if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
 
       // 4001 = revoked/unauthorized — clear all state and stop reconnecting
       if (event.code === 4001) {
@@ -463,10 +482,34 @@ if (typeof window !== 'undefined') {
         return;
       }
 
+      // Host disconnected — reset server-dependent state so the edge device
+      // doesn't display stale data.  The welcome message on reconnect will
+      // restore the real state.
+      registered = false;
+      usePlayerStore.setState({
+        currentTrack: null,
+        isPlaying: false,
+        queue: [],
+        hasHistory: false,
+        devices: [],
+        activeDeviceId: null,
+        currentTime: 0,
+        duration: 0,
+      });
+      useLibraryStore.setState({ songs: [], loading: false });
+      const a = getAudio();
+      a.pause();
+      a.src = '';
+
+      // Reset interpolation anchors so the position doesn't keep ticking
+      serverPositionAnchor = 0;
+      serverPositionTimestamp = 0;
+      serverIsPlaying = false;
+
       if (!settled) {
         settled = true;
-        console.log('[OpenTunes] WebSocket disconnected, reconnecting...');
-        setTimeout(connectWebSocket, 1000);
+        console.log('[OpenTunes] WebSocket disconnected, resetting state and reconnecting...');
+        scheduleReconnect();
       }
     });
 
@@ -476,17 +519,30 @@ if (typeof window !== 'undefined') {
       clearTimeout(connectTimeout);
       if (!settled) {
         settled = true;
-        setTimeout(connectWebSocket, 1000);
+        // Reset stale state (same as close handler — needed when close doesn't fire)
+        registered = false;
+        usePlayerStore.setState({
+          currentTrack: null, isPlaying: false, queue: [], hasHistory: false,
+          devices: [], activeDeviceId: null, currentTime: 0, duration: 0,
+        });
+        useLibraryStore.setState({ songs: [], loading: false });
+        const ea = getAudio(); ea.pause(); ea.src = '';
+        serverPositionAnchor = 0;
+        serverPositionTimestamp = 0;
+        serverIsPlaying = false;
+        scheduleReconnect();
       }
     });
   }
 
   connectWebSocket();
 
-  // Poll every 10s as a fallback (WebSocket handles real-time sync)
+  // Poll every 10s as a fallback when WebSocket is disconnected.
+  // Always re-register if pruned, even when WS is connected.
   setInterval(() => {
     if (revoked) return;
     if (!registered) registerThisDevice();
+    if (wsConnected) return; // WebSocket handles real-time sync
     usePlayerStore.getState().syncFromServer();
   }, 10000);
 

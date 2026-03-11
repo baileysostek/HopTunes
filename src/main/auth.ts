@@ -53,6 +53,15 @@ export function validatePairingSecret(secret: string | undefined): boolean {
 // --- Device registry (persisted to disk) ---
 
 let deviceRegistry: Map<string, RegisteredDevice> = new Map();
+// O(1) token → device lookup index (maintained alongside deviceRegistry)
+let tokenIndex: Map<string, RegisteredDevice> = new Map();
+
+function rebuildTokenIndex(): void {
+  tokenIndex = new Map();
+  for (const device of deviceRegistry.values()) {
+    tokenIndex.set(device.token, device);
+  }
+}
 
 function loadDeviceRegistry(): void {
   try {
@@ -64,10 +73,44 @@ function loadDeviceRegistry(): void {
     // File doesn't exist or is corrupt — start fresh
     deviceRegistry = new Map();
   }
+  rebuildTokenIndex();
 }
 
 function saveDeviceRegistry(): void {
   fs.writeFileSync(DEVICES_FILE, JSON.stringify([...deviceRegistry.values()], null, 2), 'utf-8');
+}
+
+// Debounced save — coalesces rapid touchDevice calls into a single disk write.
+// Flushes at most once every 30 seconds.
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSaveTime = 0;
+const SAVE_DEBOUNCE_MS = 30_000;
+
+function debouncedSave(): void {
+  const now = Date.now();
+  if (now - lastSaveTime >= SAVE_DEBOUNCE_MS) {
+    // Enough time has passed — save immediately
+    lastSaveTime = now;
+    saveDeviceRegistry();
+    return;
+  }
+  // Schedule a trailing save if one isn't already pending
+  if (!saveTimer) {
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      lastSaveTime = Date.now();
+      saveDeviceRegistry();
+    }, SAVE_DEBOUNCE_MS - (now - lastSaveTime));
+  }
+}
+
+/** Flush any pending debounced save to disk (call on app shutdown). */
+export function flushDeviceRegistry(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  saveDeviceRegistry();
 }
 
 // Load on startup
@@ -82,41 +125,40 @@ export function pairDevice(
 ): { token: string } | null {
   if (secret !== pairingSecret) return null;
 
-  // If device already exists, issue a new token (re-pairing)
+  // If device already exists, remove old token from index before re-pairing
+  const existing = deviceRegistry.get(deviceId);
+  if (existing) {
+    tokenIndex.delete(existing.token);
+  }
+
   const now = Date.now();
   const token = crypto.randomBytes(32).toString('hex');
-  const existing = deviceRegistry.get(deviceId);
 
-  deviceRegistry.set(deviceId, {
+  const device: RegisteredDevice = {
     id: deviceId,
     token,
     name,
     type,
     firstSeen: existing?.firstSeen ?? now,
     lastSeen: now,
-  });
+  };
 
+  deviceRegistry.set(deviceId, device);
+  tokenIndex.set(token, device);
   saveDeviceRegistry();
   return { token };
 }
 
-/** Validate a device token. Returns the device if valid, null otherwise. */
+/** Validate a device token. Returns the device if valid, null otherwise. O(1) lookup. */
 export function validateDeviceToken(token: string | undefined): RegisteredDevice | null {
   if (!token) return null;
-  for (const device of deviceRegistry.values()) {
-    if (device.token === token) {
-      return device;
-    }
-  }
-  return null;
+  return tokenIndex.get(token) ?? null;
 }
 
 /** Update lastSeen for a device (called from auth middleware on each request). */
 export function touchDevice(device: RegisteredDevice): void {
   device.lastSeen = Date.now();
-  // Persist periodically — we batch this by saving only if >60s since last save
-  // For simplicity, save on every touch (the file is small)
-  saveDeviceRegistry();
+  debouncedSave();
 }
 
 /** Get all registered devices (for the settings UI). */
@@ -126,14 +168,18 @@ export function getRegisteredDevices(): RegisteredDevice[] {
 
 /** Revoke a single device by ID. Returns true if found and removed. */
 export function revokeDevice(deviceId: string): boolean {
-  const existed = deviceRegistry.delete(deviceId);
-  if (existed) saveDeviceRegistry();
-  return existed;
+  const device = deviceRegistry.get(deviceId);
+  if (!device) return false;
+  tokenIndex.delete(device.token);
+  deviceRegistry.delete(deviceId);
+  saveDeviceRegistry();
+  return true;
 }
 
 /** Revoke all devices. */
 export function revokeAllDevices(): void {
   deviceRegistry.clear();
+  tokenIndex.clear();
   saveDeviceRegistry();
 }
 

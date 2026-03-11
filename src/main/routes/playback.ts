@@ -1,4 +1,5 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
+import { Song, DeviceInfo } from '../../shared/types';
 import {
   getPlaybackState,
   play,
@@ -18,14 +19,12 @@ import {
   heartbeatDevice,
   setActiveDevice,
   broadcastState,
-  SongInfo,
-  DeviceInfo,
 } from '../playback';
 
 const router = Router();
 
 // Helper: respond with state and broadcast to all WebSocket clients
-function respondAndBroadcast(res: any) {
+function respondAndBroadcast(res: Response) {
   const state = getPlaybackState();
   res.json(state);
   broadcastState();
@@ -68,9 +67,9 @@ router.put('/devices/active', (req, res) => {
 });
 
 // POST /api/playback/play — play a specific song
-//   body: { song: SongInfo }
+//   body: { song: Song }
 router.post('/play', (req, res) => {
-  const { song } = req.body as { song: SongInfo };
+  const { song } = req.body as { song: Song };
   if (!song || !song.path) {
     res.status(400).json({ error: 'song is required' });
     return;
@@ -80,9 +79,9 @@ router.post('/play', (req, res) => {
 });
 
 // POST /api/playback/play-with-queue — play song and set upcoming queue
-//   body: { song: SongInfo, queue: SongInfo[] }
+//   body: { song: Song, queue: Song[] }
 router.post('/play-with-queue', (req, res) => {
-  const { song, queue } = req.body as { song: SongInfo; queue: SongInfo[] };
+  const { song, queue } = req.body as { song: Song; queue: Song[] };
   if (!song || !song.path) {
     res.status(400).json({ error: 'song is required' });
     return;
@@ -136,9 +135,9 @@ router.post('/skip-prev', (req, res) => {
 // --- Queue endpoints ---
 
 // POST /api/playback/queue — add song to end of queue
-//   body: { song: SongInfo }
+//   body: { song: Song }
 router.post('/queue', (req, res) => {
-  const { song } = req.body as { song: SongInfo };
+  const { song } = req.body as { song: Song };
   if (!song || !song.path) {
     res.status(400).json({ error: 'song is required' });
     return;
@@ -148,9 +147,9 @@ router.post('/queue', (req, res) => {
 });
 
 // POST /api/playback/queue/next — add song as next in queue
-//   body: { song: SongInfo }
+//   body: { song: Song }
 router.post('/queue/next', (req, res) => {
-  const { song } = req.body as { song: SongInfo };
+  const { song } = req.body as { song: Song };
   if (!song || !song.path) {
     res.status(400).json({ error: 'song is required' });
     return;
