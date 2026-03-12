@@ -14,6 +14,6 @@ export default defineHandler({
   }),
   handle(msg, ctx) {
     if (!ctx.connectedDeviceId) return;
-    updateEdgeLibraryHashes(ctx.connectedDeviceId, msg.updates);
+    updateEdgeLibraryHashes(ctx.connectedDeviceId, msg.updates as { localPath: string; hash: string }[]);
   },
 });

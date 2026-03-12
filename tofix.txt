@@ -1,1 +1,0 @@
-The hook that triggers on android app disconnect is too lenient. any time the app is navigated away from, or the phone screen turns off it switches playback to the host device. 

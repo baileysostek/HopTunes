@@ -89,7 +89,7 @@ export async function registerEdgeLibrary(
     if (!syncing) {
       // Edge device is done hashing — defer the sync-done until after
       // the debounced library broadcast so the banner is visible
-      pendingSyncDone.add(deviceName);
+      pendingSyncDone.set(deviceName, deviceId);
     }
   }
 
@@ -239,6 +239,10 @@ export async function streamAudioFromEdge(
 
   const passThrough = new PassThrough();
   const writeStream = fs.createWriteStream(tempPath);
+
+  // Suppress stream errors here — they are already handled via pending.reject()
+  passThrough.on('error', () => {});
+  writeStream.on('error', () => {});
 
   // Pipe PassThrough to both HTTP response and cache file
   passThrough.pipe(writeStream);
@@ -539,8 +543,8 @@ function findAlternativeSource(hash: string, excludeDeviceId: string): Song | nu
 let broadcastTimer: ReturnType<typeof setTimeout> | null = null;
 const BROADCAST_DEBOUNCE_MS = 300;
 
-// Device names that need an 'edge-sync-done' after the next library broadcast
-const pendingSyncDone = new Set<string>();
+// Devices that need an 'edge-sync-done' after the next library broadcast (name → id)
+const pendingSyncDone = new Map<string, string>();
 
 async function broadcastUnifiedLibrary(): Promise<void> {
   if (!broadcastFn) return;
@@ -554,8 +558,9 @@ async function broadcastUnifiedLibrary(): Promise<void> {
 
       // Send deferred sync-done notifications after the library update
       if (pendingSyncDone.size > 0) {
-        for (const deviceName of pendingSyncDone) {
-          broadcastFn!({ type: 'edge-sync-done', deviceName });
+        for (const [deviceName, deviceId] of pendingSyncDone) {
+          const newSongCount = library.filter(s => s.origin?.deviceId === deviceId).length;
+          broadcastFn!({ type: 'edge-sync-done', deviceName, newSongCount });
         }
         pendingSyncDone.clear();
       }

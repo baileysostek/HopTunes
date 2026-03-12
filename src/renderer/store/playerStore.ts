@@ -721,7 +721,7 @@ if (typeof window !== 'undefined') {
           case 'edge-sync-done': {
             if (!isCapacitor()) {
               const { useSyncStore } = await import('../components/SyncBanner');
-              useSyncStore.getState().finishEdgeSync(msg.deviceName);
+              useSyncStore.getState().finishEdgeSync(msg.deviceName, msg.newSongCount);
             }
             break;
           }

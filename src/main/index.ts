@@ -207,7 +207,9 @@ const createWindow = async (): Promise<void> => {
         }
 
         // Protocol version negotiation — reject incompatible edge clients
-        const clientVersion = parseInt(url.searchParams.get('v') || '', 10);
+        // Missing version defaults to MIN so existing clients without ?v= still connect
+        const rawVersion = url.searchParams.get('v');
+        const clientVersion = rawVersion ? parseInt(rawVersion, 10) : MIN_WS_PROTOCOL_VERSION;
         if (isNaN(clientVersion) || clientVersion < MIN_WS_PROTOCOL_VERSION || clientVersion > WS_PROTOCOL_VERSION) {
           console.log(`[WS] Rejected client with incompatible protocol version: ${clientVersion || 'none'} (expected ${MIN_WS_PROTOCOL_VERSION}–${WS_PROTOCOL_VERSION})`);
           ws.close(4002, `unsupported protocol version, expected ${MIN_WS_PROTOCOL_VERSION}-${WS_PROTOCOL_VERSION}`);

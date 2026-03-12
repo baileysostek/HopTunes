@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { defineHandler } from '../types';
 import { registerEdgeLibrary } from '../../federation';
+import { EdgeSongMeta } from '../../../shared/types';
 
 const edgeSongMetaSchema = z.object({
   localPath: z.string(),
@@ -29,7 +30,7 @@ export default defineHandler({
       ctx.connectedDeviceId,
       ctx.connectedDeviceName || msg.deviceId,
       ctx.ws,
-      msg.songs,
+      msg.songs as EdgeSongMeta[],
       msg.syncing,
     );
   },

@@ -25,7 +25,7 @@ interface SyncState {
   /** Host-side: an edge device is syncing with us. */
   startEdgeSync: (deviceName: string, songCount: number) => void;
   /** Host-side: edge device sync is complete. */
-  finishEdgeSync: (deviceName: string) => void;
+  finishEdgeSync: (deviceName: string, newSongCount: number) => void;
   finish: () => void;
 }
 
@@ -53,10 +53,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
     set({ active: true, phase: 'syncing', deviceName, songCount });
   },
-  finishEdgeSync: (deviceName) => {
+  finishEdgeSync: (deviceName, newSongCount) => {
     const state = get();
     if (state.phase === 'syncing' && state.deviceName === deviceName) {
-      set({ phase: 'done' });
+      set({ phase: 'done', songCount: newSongCount });
       dismissTimer = setTimeout(() => {
         dismissTimer = null;
         set({ active: false });
@@ -128,14 +128,12 @@ const SyncBanner: React.FC = () => {
       label = `Computing hashes (${hashCompleted}/${hashTotal})`;
       break;
     case 'syncing':
-      label = songCount > 0
-        ? `Syncing ${songCount} songs from ${deviceName}...`
-        : `Syncing with ${deviceName}...`;
+      label = `Syncing with ${deviceName}...`;
       break;
     case 'done':
       label = songCount > 0
-        ? `Synced ${songCount} songs from ${deviceName}`
-        : `Synced with ${deviceName}`;
+        ? `Synced ${songCount} new song${songCount === 1 ? '' : 's'} from ${deviceName}`
+        : `Synced with ${deviceName} — no new songs`;
       break;
     default:
       label = 'Syncing...';

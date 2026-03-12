@@ -1,30 +1,40 @@
 ## TODO
 
 ### Existing
-1. [ ] - Cleanup Express Server
+1. [x] - Cleanup Express Server
 1. [ ] - Setup Certbot-esque system to check if certs are invalidated and re-issue them if they are.
 1. [x] - Write simple frontend
 1. [x] - SqlLite DB hosted with app to hold all songs
 ---
 
 ### Themes
-1. [ ] - Create a Zustand `themeStore` to hold the active theme and user-customized colors
-1. [ ] - Define a `Theme` type with tokens: `primary`, `background`, `surface`, `text`, `accent`, `nowPlayingBar`, `sidebar`, etc.
-1. [ ] - Ship built-in presets (Dark/Spotify Green, Light, Classic iTunes Blue, High Contrast)
-1. [ ] - Replace all hardcoded hex colors (`#1db954`, `#0a0a0a`, `#141414`, etc.) in components with theme tokens via MUI `ThemeProvider`
-1. [ ] - Add a "Custom Theme" option with MUI color pickers for each token
-1. [ ] - Persist the selected theme using the existing `saveableStore` pattern so it survives restarts
+1. [x] - Create a Zustand `themeStore` to hold the active theme and user-customized colors
+1. [x] - Define a `Theme` type with tokens: `primary`, `background`, `surface`, `text`, `accent`, `nowPlayingBar`, `sidebar`, etc.
+1. [x] - Ship built-in presets (Dark/Spotify Green, Light, Classic iTunes Blue, High Contrast)
+1. [x] - Replace all hardcoded hex colors (`#1db954`, `#0a0a0a`, `#141414`, etc.) in components with theme tokens via MUI `ThemeProvider`
+1. [x] - Add a "Custom Theme" option with MUI color pickers for each token
+1. [x] - Persist the selected theme using the existing `saveableStore` pattern so it survives restarts
 1. [ ] - Sync the active theme across devices via WebSocket so mobile and desktop stay visually consistent
 
 ### Refactor Settings Page → Modal
-1. [ ] - Remove fullscreen button
-1. [ ] - Study the existing `ConnectModal.tsx` pattern (glassmorphism backdrop, fade-in animation, click-outside-to-close)
-1. [ ] - Create `SettingsModal.tsx` following the same overlay + centered card layout
-1. [ ] - Move device management UI (connected devices list, revoke buttons) from `Settings.tsx` into the modal
-1. [ ] - Add tabbed sections inside the modal: "Devices", "Library", "Themes", "About"
-1. [ ] - Wire the modal open/close to a gear icon in the `Sidebar` (replace the current `/settings` route navigation)
-1. [ ] - Remove the `/settings` route from `App.tsx` once the modal fully works
-1. [ ] - Ensure it works on both Electron and Capacitor (mobile may need a full-screen variant)
+1. [x] - Remove fullscreen button
+1. [x] - Study the existing `ConnectModal.tsx` pattern (glassmorphism backdrop, fade-in animation, click-outside-to-close)
+1. [x] - Create `SettingsModal.tsx` following the same overlay + centered card layout
+1. [x] - Move device management UI (connected devices list, revoke buttons) from `Settings.tsx` into the modal
+1. [x] - Add tabbed sections inside the modal: "Devices", "Library", "Themes", "About"
+1. [x] - Wire the modal open/close to a gear icon in the `Sidebar` (replace the current `/settings` route navigation)
+1. [x] - Remove the `/settings` route from `App.tsx` once the modal fully works
+1. [x] - Ensure it works on both Electron and Capacitor (mobile may need a full-screen variant)
+
+### Library Federation (Edge Device Sync)
+1. [x] - Implement `federation.ts` host-side federation manager for edge device registration and library merging
+1. [x] - Implement `edgeLibrary.ts` and `edgeLibraryUpdate.ts` WebSocket handlers for edge device communication
+1. [x] - Edge device library deduplication and unified library combining host + edge libraries
+1. [x] - Reverse audio streaming from edge devices with stream-as-it-arrives via PassThrough
+1. [x] - Reverse art streaming from edge devices
+1. [x] - Audio cache system for offline playback of federated content
+1. [x] - Edge device online status tracking and liveness detection (ping/pong)
+1. [x] - `SyncBanner.tsx` showing edge device sync progress with visual states
 
 ### Playlists
 1. [ ] - Add a `playlists` table to SQLite: `id (UUID)`, `name`, `createdAt`, `updatedAt`, `coverArt (nullable)`
@@ -64,13 +74,13 @@
 1. [ ] - Wire through the existing `/api/playback/play-with-queue` endpoint
 
 ### Android Auto Support
-1. [ ] - Add `androidx.car.app:app` dependency to `android/app/build.gradle`
-1. [ ] - Implement `MediaBrowserServiceCompat` exposing the music library as a browsable tree (artists → albums → tracks)
-1. [ ] - Implement `MediaSessionCompat` for transport controls (play, pause, skip, seek) mapped to the Express playback API
-1. [ ] - Register the service in `AndroidManifest.xml` with `com.google.android.gms.car.application` metadata
-1. [ ] - Build album art `ContentProvider` so Android Auto can display cover art
-1. [ ] - Test with Desktop Head Unit (DHU) emulator before testing in the car
-1. [ ] - Handle audio focus properly so OpenTunes pauses for nav prompts and phone calls
+1. [x] - Add `androidx.car.app:app` dependency to `android/app/build.gradle`
+1. [x] - Implement `MediaBrowserServiceCompat` exposing the music library as a browsable tree (artists → albums → tracks)
+1. [x] - Implement `MediaSessionCompat` for transport controls (play, pause, skip, seek) mapped to the Express playback API
+1. [x] - Register the service in `AndroidManifest.xml` with `com.google.android.gms.car.application` metadata
+1. [x] - Build album art `ContentProvider` so Android Auto can display cover art
+1. [x] - Test with Desktop Head Unit (DHU) emulator before testing in the car
+1. [x] - Handle audio focus properly so OpenTunes pauses for nav prompts and phone calls
 1. [ ] - Cleartext HTTP over local network should already work (existing `capacitor.config.ts` allows it)
 
 ---

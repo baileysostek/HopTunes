@@ -81,7 +81,7 @@ export type ServerWsMessage =
   | { type: 'reindex-progress'; found: number }
   // Federation: host notifies clients about edge device sync status
   | { type: 'edge-sync-start'; deviceName: string; songCount: number }
-  | { type: 'edge-sync-done'; deviceName: string }
+  | { type: 'edge-sync-done'; deviceName: string; newSongCount: number }
   // Federation: host asks edge device for audio/art
   | { type: 'request-audio'; requestId: string; localPath: string }
   | { type: 'request-art'; requestId: string; localPath: string };
