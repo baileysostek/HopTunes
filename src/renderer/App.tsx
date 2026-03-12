@@ -5,7 +5,6 @@ import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import Home from './pages/Home';
 
 import Layout from './components/Layout';
-import { saveAllStores, loadAllStores } from './store/stores';
 import { initNativeMediaSession } from './nativeMediaSession';
 import { useThemeStore, ThemeMode } from './store/themeStore';
 import './app.css';
@@ -48,14 +47,7 @@ const App = () => {
   const theme = useMemo(() => buildTheme(mode, accent), [mode, accent]);
 
   useEffect(() => {
-    loadAllStores();
     initNativeMediaSession();
-
-    const autosaveInterval = setInterval(() => {
-      saveAllStores();
-    }, 10000);
-
-    return () => clearInterval(autosaveInterval);
   }, []);
 
   // Sync body background for areas outside the app root

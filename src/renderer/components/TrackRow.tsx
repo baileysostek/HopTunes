@@ -9,6 +9,7 @@ interface TrackRowProps {
   track: Song;
   index: number;
   onPlay: () => void;
+  departing?: boolean;
 }
 
 function formatDuration(seconds: number | null): string {
@@ -18,7 +19,7 @@ function formatDuration(seconds: number | null): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
+const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) => {
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const showContextMenu = useContextMenuStore(s => s.show);
   const isActive = currentTrack?.path === track.path;
@@ -31,21 +32,30 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay }) => {
 
   return (
     <Box
-      onClick={onPlay}
-      onContextMenu={handleContextMenu}
+      onClick={departing ? undefined : onPlay}
+      onContextMenu={departing ? undefined : handleContextMenu}
       sx={{
         display: 'flex',
         alignItems: 'center',
         py: 0.75,
         px: 1.5,
         borderRadius: 1,
-        cursor: 'pointer',
+        cursor: departing ? 'default' : 'pointer',
         color: isActive ? 'primary.main' : 'text.secondary',
         transition: 'background 0.15s',
         '&:hover': {
-          bgcolor: 'divider',
-          color: isActive ? 'primary.main' : 'text.primary',
+          bgcolor: departing ? undefined : 'divider',
+          color: departing ? undefined : (isActive ? 'primary.main' : 'text.primary'),
         },
+        ...(departing && {
+          '@keyframes trackShrinkOut': {
+            '0%': { opacity: 1, transform: 'scaleY(1)' },
+            '100%': { opacity: 0, transform: 'scaleY(0)' },
+          },
+          transformOrigin: 'top',
+          animation: 'trackShrinkOut 350ms ease-out forwards',
+          pointerEvents: 'none',
+        }),
       }}
     >
       <Typography sx={{

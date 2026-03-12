@@ -7,8 +7,8 @@ import { Song, getMediaUrl } from '../types/song';
 import { useArtistImage } from '../hooks/useArtistImage';
 
 type ListItem =
-  | { type: 'artist-banner'; artist: string; songCount: number; albumCount: number; totalDuration: number; bannerArt: string | null }
-  | { type: 'album'; artist: string; albumName: string; tracks: Song[]; artUrl: string | null };
+  | { type: 'artist-banner'; artist: string; songCount: number; albumCount: number; totalDuration: number; bannerArt: string | null; departing?: boolean }
+  | { type: 'album'; artist: string; albumName: string; tracks: Song[]; artUrl: string | null; allDeparting?: boolean; departingSongPaths?: Set<string> };
 
 const ArtistBanner: React.FC<{ item: Extract<ListItem, { type: 'artist-banner' }> }> = ({ item }) => {
   const artistImage = useArtistImage(item.artist);
@@ -24,6 +24,14 @@ const ArtistBanner: React.FC<{ item: Extract<ListItem, { type: 'artist-banner' }
       height: 280,
       display: 'flex',
       alignItems: 'flex-end',
+      ...(item.departing && {
+        '@keyframes bannerShrinkOut': {
+          '0%': { opacity: 1, transform: 'scale(1)' },
+          '100%': { opacity: 0, transform: 'scale(0.97)' },
+        },
+        animation: 'bannerShrinkOut 350ms ease-out forwards',
+        pointerEvents: 'none',
+      }),
     }}>
       {/* Background: prefer fetched artist image, fall back to blurred album art, then gradient */}
       {hasExternalArt ? (
@@ -108,6 +116,7 @@ const Home = () => {
   const searchQuery = useLibraryStore(s => s.searchQuery);
   const selectedArtist = useLibraryStore(s => s.selectedArtist);
   const fetchLibrary = useLibraryStore(s => s.fetchLibrary);
+  const departingSongPaths = useLibraryStore(s => s.departingSongPaths);
 
   useEffect(() => {
     fetchLibrary();
@@ -150,11 +159,16 @@ const Home = () => {
 
     const sorted = [...artistMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     const flat: ListItem[] = [];
+    const hasDepartures = departingSongPaths.size > 0;
 
     for (const [artist, albums] of sorted) {
       const allTracks = [...albums.values()];
       const firstWithArt = allTracks.find(tracks => tracks.some(t => t.art));
       const bannerArt = firstWithArt?.find(t => t.art)?.art || null;
+
+      // Check if every song under this artist is departing
+      const artistDeparting = hasDepartures &&
+        allTracks.every(tracks => tracks.every(t => departingSongPaths.has(t.path)));
 
       flat.push({
         type: 'artist-banner',
@@ -163,21 +177,27 @@ const Home = () => {
         albumCount: albums.size,
         totalDuration: allTracks.reduce((sum, tracks) => sum + tracks.reduce((s, t) => s + (t.duration || 0), 0), 0),
         bannerArt,
+        departing: artistDeparting,
       });
 
       for (const [albumName, tracks] of albums.entries()) {
+        const allDeparting = hasDepartures &&
+          tracks.every(t => departingSongPaths.has(t.path));
+
         flat.push({
           type: 'album',
           artist,
           albumName,
           tracks,
           artUrl: tracks.find(t => t.art)?.art || null,
+          allDeparting,
+          departingSongPaths: hasDepartures ? departingSongPaths : undefined,
         });
       }
     }
 
     return flat;
-  }, [filteredSongs]);
+  }, [filteredSongs, departingSongPaths]);
 
   const renderItem = useCallback((_index: number, item: ListItem) => {
     if (item.type === 'artist-banner') {
@@ -189,6 +209,8 @@ const Home = () => {
         tracks={item.tracks}
         artUrl={item.artUrl}
         artistName={item.artist}
+        allDeparting={item.allDeparting}
+        departingSongPaths={item.departingSongPaths}
       />
     );
   }, []);

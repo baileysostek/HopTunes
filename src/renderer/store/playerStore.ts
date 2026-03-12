@@ -693,7 +693,7 @@ if (typeof window !== 'undefined') {
             );
             break;
           case 'library': {
-            useLibraryStore.setState({ songs: msg.data, loading: false });
+            useLibraryStore.getState().setSongsWithTransition(msg.data);
             const { useReindexStore } = await import('../components/ReindexOverlay');
             if (useReindexStore.getState().active) {
               useReindexStore.getState().stop();

@@ -5,6 +5,8 @@ import { AUDIO_PATH_PREFIX } from '../../shared/types';
 import { mapHostSongRows } from '../../shared/federation';
 import { isCapacitor } from '../utils/platform';
 
+export const DEPART_ANIMATION_MS = 350;
+
 type LibrarySource = 'server' | 'local';
 
 interface LibraryState {
@@ -13,13 +15,17 @@ interface LibraryState {
   searchQuery: string;
   selectedArtist: string | null;
   source: LibrarySource;
+  departingSongPaths: Set<string>;
   fetchLibrary: () => Promise<void>;
   hideSong: (song: Song) => Promise<void>;
+  setSongsWithTransition: (newSongs: Song[]) => void;
   setSearchQuery: (query: string) => void;
   setSelectedArtist: (artist: string | null) => void;
   switchToLocalLibrary: () => Promise<void>;
   switchToServerLibrary: () => void;
 }
+
+let departureTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   songs: [],
@@ -27,6 +33,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   searchQuery: '',
   selectedArtist: null,
   source: 'server' as LibrarySource,
+  departingSongPaths: new Set<string>(),
 
   fetchLibrary: async () => {
     set({ loading: true });
@@ -52,6 +59,42 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     } catch (err) {
       console.error('Failed to hide song:', err);
     }
+  },
+
+  setSongsWithTransition: (newSongs: Song[]) => {
+    if (departureTimer) {
+      clearTimeout(departureTimer);
+      departureTimer = null;
+    }
+
+    const { songs: currentSongs } = get();
+    const newPaths = new Set(newSongs.map(s => s.path));
+
+    // Find songs being removed (in current array but not in the new one)
+    const departing = currentSongs.filter(s => !newPaths.has(s.path));
+
+    if (departing.length === 0) {
+      set({ songs: newSongs, departingSongPaths: new Set(), loading: false });
+      return;
+    }
+
+    const departingPaths = new Set(departing.map(s => s.path));
+
+    // Keep departing songs in the array so they remain visible during animation
+    set({
+      songs: [...newSongs, ...departing],
+      departingSongPaths: departingPaths,
+      loading: false,
+    });
+
+    // Remove departing songs after animation completes
+    departureTimer = setTimeout(() => {
+      departureTimer = null;
+      set(state => ({
+        songs: state.songs.filter(s => !departingPaths.has(s.path)),
+        departingSongPaths: new Set(),
+      }));
+    }, DEPART_ANIMATION_MS);
   },
 
   setSearchQuery: (query) => set({ searchQuery: query }),

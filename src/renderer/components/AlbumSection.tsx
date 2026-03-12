@@ -11,6 +11,8 @@ interface AlbumSectionProps {
   tracks: Song[];
   artUrl: string | null;
   artistName: string;
+  allDeparting?: boolean;
+  departingSongPaths?: Set<string>;
 }
 
 function formatTotalDuration(songs: Song[]): string {
@@ -23,7 +25,7 @@ function formatTotalDuration(songs: Song[]): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, artistName }) => {
+const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, artistName, allDeparting, departingSongPaths }) => {
   const play = usePlayerStore(s => s.play);
   const showAlbumMenu = useAlbumContextMenuStore(s => s.show);
   const externalArt = useAlbumImage(artUrl ? '' : artistName, artUrl ? '' : albumName);
@@ -51,6 +53,14 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
         '&:hover': {
           bgcolor: 'action.hover',
         },
+        ...(allDeparting && {
+          '@keyframes albumShrinkOut': {
+            '0%': { opacity: 1, transform: 'scale(1)' },
+            '100%': { opacity: 0, transform: 'scale(0.97)' },
+          },
+          animation: 'albumShrinkOut 350ms ease-out forwards',
+          pointerEvents: 'none',
+        }),
       }}
     >
       {/* Album Art */}
@@ -127,6 +137,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
             track={track}
             index={idx + 1}
             onPlay={() => play(track, sortedTracks)}
+            departing={!allDeparting && !!departingSongPaths?.has(track.path)}
           />
         ))}
       </Box>
