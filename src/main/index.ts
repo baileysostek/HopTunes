@@ -5,7 +5,7 @@ import { indexLibrary } from './indexer';
 import { getPlaybackState, onStateChange, removeDevice as removePlaybackDevice, broadcastState, registerDevice as registerPlaybackDevice, heartbeatDevice } from './playback';
 import { isLocalAddress, validateDeviceToken, touchDevice, flushDeviceRegistry } from './auth';
 import { PORT, MUSIC_DIR, buildCsp } from './config';
-import { ClientWsMessage, ServerWsMessage } from '../shared/types';
+import { ClientWsMessage, ServerWsMessage, WS_PROTOCOL_VERSION } from '../shared/types';
 import {
   setFederationBroadcast,
   registerEdgeLibrary,
@@ -26,6 +26,22 @@ import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as http from 'http';
 import express from 'express';
+
+// --- Rate-limited WS parse error logger ---
+let wsParseErrorCount = 0;
+let wsParseErrorLastLog = 0;
+const WS_ERROR_LOG_INTERVAL = 5_000; // log at most once per 5 seconds
+
+function logWsParseError(err: unknown): void {
+  wsParseErrorCount++;
+  const now = Date.now();
+  if (now - wsParseErrorLastLog >= WS_ERROR_LOG_INTERVAL) {
+    const count = wsParseErrorCount;
+    wsParseErrorCount = 0;
+    wsParseErrorLastLog = now;
+    console.warn(`[WS] ${count} malformed message(s) in the last ${WS_ERROR_LOG_INTERVAL / 1000}s:`, err);
+  }
+}
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -246,8 +262,8 @@ const createWindow = async (): Promise<void> => {
               handleEdgeArtResponse(msg.requestId, msg.data);
               break;
           }
-        } catch {
-          // Ignore malformed messages
+        } catch (err) {
+          logWsParseError(err);
         }
       });
 
@@ -270,6 +286,7 @@ const createWindow = async (): Promise<void> => {
           if (ws.readyState !== WebSocket.OPEN) return;
           const welcome: ServerWsMessage = {
             type: 'welcome',
+            protocolVersion: WS_PROTOCOL_VERSION,
             state: getPlaybackState(),
             library,
           };

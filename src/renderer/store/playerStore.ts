@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import axios from 'axios';
 import { Song, getApiBase, getAuthToken, getMediaUrl, clearConnection } from '../types/song';
-import { ClientWsMessage, DeviceInfo, DeviceType, ServerPlaybackState, ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
+import { ClientWsMessage, DeviceInfo, DeviceType, ServerPlaybackState, ServerWsMessage, AUDIO_PATH_PREFIX, WS_PROTOCOL_VERSION } from '../../shared/types';
 import { isElectron, isCapacitor } from '../utils/platform';
 import { useLibraryStore } from './libraryStore';
 import { initLocalLibrary, handleLocalLibraryMessage, getLocalFileUrl } from '../services/localLibrary';
@@ -677,6 +677,11 @@ if (typeof window !== 'undefined') {
 
         switch (msg.type) {
           case 'welcome':
+            if (msg.protocolVersion !== WS_PROTOCOL_VERSION) {
+              console.warn(
+                `[OpenTunes] Protocol version mismatch: server=${msg.protocolVersion}, client=${WS_PROTOCOL_VERSION}. Some features may not work.`
+              );
+            }
             applyServerState(
               msg.state,
               usePlayerStore.setState.bind(usePlayerStore),

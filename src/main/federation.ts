@@ -9,7 +9,7 @@ import { app } from 'electron';
 import { WebSocket } from 'ws';
 import { Response } from 'express';
 import { Song, EdgeSongMeta, ServerWsMessage } from '../shared/types';
-import { mapHostSongRows, mapEdgeSongs, deduplicateSongs, EdgeLibraryEntry } from '../shared/federation';
+import { mapHostSongRows, mapEdgeSongs, deduplicateSongs, mergeLibraries, EdgeLibraryEntry } from '../shared/federation';
 import { getAllSongs } from './database';
 import { handleSongSourceLost, getPlaybackState } from './playback';
 
@@ -34,13 +34,19 @@ interface PendingStream {
   resolve: () => void;
   reject: (err: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+  /** Resolves when the edge device sends the audio-response metadata. */
+  metadataResolve: (() => void) | null;
 }
 
 // --- State ---
 
 const edgeDevices = new Map<string, EdgeDevice>();
 const pendingStreams = new Map<string, PendingStream>();  // requestId → stream
-const activeRequests = new Map<string, string>();          // deviceId → requestId (one at a time per device)
+const activeRequests = new Map<string, Set<string>>();    // deviceId → set of in-flight requestIds
+// Tracks which request is currently receiving binary data from each device.
+// The edge device processes requests sequentially, so binary frames always
+// belong to the request that most recently received its edge-audio-response.
+const currentStreamingRequest = new Map<string, string>(); // deviceId → requestId
 
 let broadcastFn: ((msg: ServerWsMessage) => void) | null = null;
 
@@ -123,21 +129,24 @@ export async function unregisterEdgeDevice(deviceId: string): Promise<void> {
   const device = edgeDevices.get(deviceId);
   if (!device) return;
 
-  // Cancel any pending streams from this device
-  const activeReqId = activeRequests.get(deviceId);
-  if (activeReqId) {
-    const pending = pendingStreams.get(activeReqId);
-    if (pending && !pending.resolved) {
-      pending.resolved = true;
-      clearTimeout(pending.timeout);
-      pending.passThrough.destroy(new Error('Device disconnected'));
-      pending.writeStream.destroy();
-      cleanupTempFile(pending.tempPath);
-      pending.reject(new Error('Device disconnected'));
+  // Cancel all pending streams from this device
+  const reqIds = activeRequests.get(deviceId);
+  if (reqIds) {
+    for (const reqId of reqIds) {
+      const pending = pendingStreams.get(reqId);
+      if (pending && !pending.resolved) {
+        pending.resolved = true;
+        clearTimeout(pending.timeout);
+        pending.passThrough.destroy(new Error('Device disconnected'));
+        pending.writeStream.destroy();
+        cleanupTempFile(pending.tempPath);
+        pending.reject(new Error('Device disconnected'));
+      }
+      pendingStreams.delete(reqId);
     }
-    pendingStreams.delete(activeReqId);
     activeRequests.delete(deviceId);
   }
+  currentStreamingRequest.delete(deviceId);
 
   edgeDevices.delete(deviceId);
   pendingSyncDone.delete(device.deviceName);
@@ -177,25 +186,7 @@ export async function getUnifiedLibrary(): Promise<Song[]> {
     onlineDevices.add(deviceId);
   }
 
-  // Use shared pure functions for merge + dedup + sort
-  const all: Song[] = [...hostSongs];
-  for (const [deviceId, entry] of edgeLibraries) {
-    const available = onlineDevices.has(deviceId);
-    const edgeSongs = mapEdgeSongs(entry.songs, deviceId, entry.deviceName, available);
-    all.push(...edgeSongs);
-  }
-
-  const deduped = deduplicateSongs(all);
-
-  // Sort: artist, album, trackNumber, title
-  deduped.sort((a, b) =>
-    a.artist.localeCompare(b.artist)
-    || a.album.localeCompare(b.album)
-    || a.trackNumber - b.trackNumber
-    || a.title.localeCompare(b.title)
-  );
-
-  return deduped;
+  return mergeLibraries(hostSongs, edgeLibraries, onlineDevices);
 }
 
 /** Check if an edge device is currently registered and connected. */
@@ -239,18 +230,6 @@ export async function streamAudioFromEdge(
     return false;
   }
 
-  // Check if there's already an active stream for this device+path
-  const existingReqId = activeRequests.get(deviceId);
-  if (existingReqId) {
-    const existing = pendingStreams.get(existingReqId);
-    if (existing && !existing.resolved) {
-      // Another request is in progress — piggyback by piping the same passthrough
-      // This is a simplified approach: only one stream per device at a time
-      res.status(503).json({ error: 'Another stream is in progress from this device' });
-      return true; // We handled the response
-    }
-  }
-
   const requestId = `${deviceId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const tempPath = cachePath + '.tmp';
 
@@ -280,9 +259,13 @@ export async function streamAudioFromEdge(
         writeStream.destroy();
         cleanupTempFile(tempPath);
         pendingStreams.delete(requestId);
-        activeRequests.delete(deviceId);
+        removeActiveRequest(deviceId, requestId);
+        if (currentStreamingRequest.get(deviceId) === requestId) {
+          currentStreamingRequest.delete(deviceId);
+        }
       }
     }, STREAM_TIMEOUT),
+    metadataResolve: null,
   };
 
   // Set up completion promise
@@ -292,7 +275,10 @@ export async function streamAudioFromEdge(
   });
 
   pendingStreams.set(requestId, pending);
-  activeRequests.set(deviceId, requestId);
+  if (!activeRequests.has(deviceId)) {
+    activeRequests.set(deviceId, new Set());
+  }
+  activeRequests.get(deviceId)!.add(requestId);
 
   // When the PassThrough ends successfully, move temp to cache
   writeStream.on('finish', () => {
@@ -315,24 +301,15 @@ export async function streamAudioFromEdge(
   };
   device.ws.send(JSON.stringify(requestMsg));
 
-  // Wait for the metadata response (edge-audio-response) before piping to HTTP
-  // The metadata handler will set headers and pipe passThrough → res
+  // Wait for the metadata response (edge-audio-response) before piping to HTTP.
+  // handleEdgeAudioResponse() resolves metadataPromise when metadata arrives.
+  const metadataPromise = new Promise<void>((resolve) => {
+    pending.metadataResolve = resolve;
+  });
+
   try {
     await Promise.race([
-      new Promise<void>((resolve) => {
-        const check = () => {
-          if (pending.mimeType !== null) {
-            resolve();
-            return;
-          }
-          if (pending.resolved) {
-            resolve(); // Will be handled as error below
-            return;
-          }
-          setTimeout(check, 10);
-        };
-        check();
-      }),
+      metadataPromise,
       completionPromise.catch(() => {}),
       new Promise<void>((_, reject) =>
         setTimeout(() => reject(new Error('Metadata timeout')), STREAM_TIMEOUT)
@@ -346,7 +323,7 @@ export async function streamAudioFromEdge(
       writeStream.destroy();
       cleanupTempFile(tempPath);
       pendingStreams.delete(requestId);
-      activeRequests.delete(deviceId);
+      removeActiveRequest(deviceId, requestId);
     }
     return false;
   }
@@ -380,6 +357,22 @@ export function handleEdgeAudioResponse(requestId: string, mimeType: string, fil
 
   pending.mimeType = mimeType;
   pending.fileSize = fileSize;
+
+  // Mark this request as the one currently receiving binary frames from its device.
+  // The edge device processes requests sequentially, so the most recent
+  // edge-audio-response always identifies the active binary stream.
+  for (const [devId, reqIds] of activeRequests) {
+    if (reqIds.has(requestId)) {
+      currentStreamingRequest.set(devId, requestId);
+      break;
+    }
+  }
+
+  // Notify streamAudioFromEdge() that metadata is available
+  if (pending.metadataResolve) {
+    pending.metadataResolve();
+    pending.metadataResolve = null;
+  }
 }
 
 /**
@@ -387,7 +380,7 @@ export function handleEdgeAudioResponse(requestId: string, mimeType: string, fil
  * Called from the WS message router when binary data arrives from an edge device.
  */
 export function handleEdgeBinaryFrame(deviceId: string, data: Buffer): void {
-  const requestId = activeRequests.get(deviceId);
+  const requestId = currentStreamingRequest.get(deviceId);
   if (!requestId) return;
 
   const pending = pendingStreams.get(requestId);
@@ -399,7 +392,8 @@ export function handleEdgeBinaryFrame(deviceId: string, data: Buffer): void {
     clearTimeout(pending.timeout);
     pending.passThrough.end();
     pendingStreams.delete(requestId);
-    activeRequests.delete(deviceId);
+    removeActiveRequest(deviceId, requestId);
+    currentStreamingRequest.delete(deviceId);
     pending.resolve();
   } else {
     // Write chunk to PassThrough (which pipes to both HTTP response and cache file)
@@ -570,10 +564,35 @@ export async function getUnifiedLibraryNow(): Promise<Song[]> {
   return getUnifiedLibrary();
 }
 
+/** Remove a single requestId from the per-device active request set. */
+function removeActiveRequest(deviceId: string, requestId: string): void {
+  const reqIds = activeRequests.get(deviceId);
+  if (!reqIds) return;
+  reqIds.delete(requestId);
+  if (reqIds.size === 0) {
+    activeRequests.delete(deviceId);
+  }
+}
+
 function cleanupTempFile(tempPath: string): void {
   try {
     if (fs.existsSync(tempPath)) {
       fs.unlinkSync(tempPath);
     }
   } catch { /* best effort */ }
+}
+
+/** @internal Reset all module state. Only for use in tests. */
+export function __resetForTesting(): void {
+  edgeDevices.clear();
+  pendingStreams.clear();
+  activeRequests.clear();
+  currentStreamingRequest.clear();
+  artRequests.clear();
+  pendingSyncDone.clear();
+  broadcastFn = null;
+  if (broadcastTimer) {
+    clearTimeout(broadcastTimer);
+    broadcastTimer = null;
+  }
 }

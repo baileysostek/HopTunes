@@ -256,3 +256,16 @@ export function broadcastState(): void {
     listener();
   }
 }
+
+/** @internal Reset all module state. Only for use in tests. */
+export function __resetForTesting(): void {
+  state.currentSong = null;
+  state.status = 'stopped';
+  state.position = 0;
+  state.updatedAt = Date.now();
+  state.queue = [];
+  state.history = [];
+  devices.clear();
+  activeDeviceId = null;
+  listeners.clear();
+}

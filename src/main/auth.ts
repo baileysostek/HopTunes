@@ -19,16 +19,12 @@ export interface RegisteredDevice {
 }
 
 function loadOrCreatePairingSecret(): string {
-  try {
-    const data = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8'));
-    if (data.token && typeof data.token === 'string') {
-      return data.token;
-    }
-  } catch {
-    // File doesn't exist or is corrupt — generate a new secret
-  }
+  // Always generate a fresh secret on startup. The pairing secret is ephemeral —
+  // device tokens in devices.json are the persistent credentials. Only a SHA-256
+  // hash is written to disk so the raw secret is never persisted.
   const secret = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(AUTH_FILE, JSON.stringify({ token: secret }), 'utf-8');
+  const hash = crypto.createHash('sha256').update(secret).digest('hex');
+  fs.writeFileSync(AUTH_FILE, JSON.stringify({ secretHash: hash }), 'utf-8');
   return secret;
 }
 
@@ -41,7 +37,8 @@ export function getPairingSecret(): string {
 /** Regenerate the pairing secret. Does NOT revoke existing device tokens. */
 export function regeneratePairingSecret(): string {
   pairingSecret = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(AUTH_FILE, JSON.stringify({ token: pairingSecret }), 'utf-8');
+  const hash = crypto.createHash('sha256').update(pairingSecret).digest('hex');
+  fs.writeFileSync(AUTH_FILE, JSON.stringify({ secretHash: hash }), 'utf-8');
   return pairingSecret;
 }
 
@@ -216,4 +213,17 @@ export function getLanAddress(): string {
     }
   }
   return '127.0.0.1';
+}
+
+/** @internal Reset all module state. Only for use in tests. */
+export function __resetForTesting(): void {
+  deviceRegistry.clear();
+  tokenIndex.clear();
+  lastPairingEvent = null;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  lastSaveTime = 0;
+  pairingSecret = crypto.randomBytes(32).toString('hex');
 }

@@ -4,6 +4,9 @@
 /** URL prefix used for audio streaming endpoints. */
 export const AUDIO_PATH_PREFIX = '/api/audio/';
 
+/** Current WS protocol version. Bump when making breaking message changes. */
+export const WS_PROTOCOL_VERSION = 1;
+
 export interface SongOrigin {
   deviceId: string;
   deviceName: string;
@@ -65,7 +68,7 @@ export interface ServerPlaybackState extends PlaybackState {
 // --- WebSocket message protocol ---
 
 export type ServerWsMessage =
-  | { type: 'welcome'; state: ServerPlaybackState; library: Song[] }
+  | { type: 'welcome'; protocolVersion: number; state: ServerPlaybackState; library: Song[] }
   | { type: 'state'; data: ServerPlaybackState }
   | { type: 'library'; data: Song[] }
   | { type: 'reindex-progress'; found: number }
