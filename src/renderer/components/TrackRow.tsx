@@ -4,6 +4,7 @@ import { useTheme } from '@mui/material/styles';
 import { Song } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
 import { useContextMenuStore } from './SongContextMenu';
+import { isMobile } from '../utils/platform';
 
 interface TrackRowProps {
   track: Song;
@@ -24,6 +25,7 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) 
   const showContextMenu = useContextMenuStore(s => s.show);
   const isActive = currentTrack?.path === track.path;
   const theme = useTheme();
+  const mobile = isMobile();
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -79,14 +81,16 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) 
       }}>
         {track.title}
       </Typography>
-      <Typography sx={{
-        fontSize: 11,
-        ml: 2,
-        color: 'text.disabled',
-        fontFamily: 'monospace',
-      }}>
-        {track.hash?.slice(0, 8)}
-      </Typography>
+      {!mobile && (
+        <Typography sx={{
+          fontSize: 11,
+          ml: 2,
+          color: 'text.disabled',
+          fontFamily: 'monospace',
+        }}>
+          {track.hash?.slice(0, 8)}
+        </Typography>
+      )}
       <Typography sx={{
         fontSize: 13,
         ml: 2,

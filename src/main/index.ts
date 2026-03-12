@@ -2,21 +2,18 @@ import { app, BrowserWindow, Menu, session } from 'electron';
 import { setupIpcHandlers } from './api';
 import { initDatabase, getMediaLocations, addMediaLocation } from './database';
 import { indexLibrary } from './indexer';
-import { getPlaybackState, onStateChange, removeDevice as removePlaybackDevice, broadcastState, registerDevice as registerPlaybackDevice, heartbeatDevice } from './playback';
+import { getPlaybackState, onStateChange, removeDevice as removePlaybackDevice, broadcastState, registerDevice as registerPlaybackDevice } from './playback';
 import { isLocalAddress, validateDeviceToken, touchDevice, flushDeviceRegistry } from './auth';
 import { PORT, MUSIC_DIR, buildCsp } from './config';
-import { ClientWsMessage, ServerWsMessage, WS_PROTOCOL_VERSION } from '../shared/types';
+import { ServerWsMessage, WS_PROTOCOL_VERSION, MIN_WS_PROTOCOL_VERSION } from '../shared/types';
 import {
   setFederationBroadcast,
-  registerEdgeLibrary,
   updateEdgeDeviceWs,
-  updateEdgeLibraryHashes,
   unregisterEdgeDevice,
   getUnifiedLibraryNow,
-  handleEdgeAudioResponse,
   handleEdgeBinaryFrame,
-  handleEdgeArtResponse,
 } from './federation';
+import { dispatchWsMessage, WsConnectionContext } from './wsHandlers';
 
 import playbackRouter from './routes/playback';
 import { createConnectRouter } from './routes/connect';
@@ -49,6 +46,10 @@ declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 if (require('electron-squirrel-startup')) {
   app.quit();
 }
+
+// --- WebSocket liveness tracking (typed alternative to bolting isAlive onto ws) ---
+
+const wsLiveness = new Map<WebSocket, boolean>();
 
 // --- WebSocket device tracking ---
 
@@ -191,8 +192,8 @@ const createWindow = async (): Promise<void> => {
       let connectedDeviceId: string | null = null;
       let connectedDeviceName: string | null = null;
 
-      (ws as any).isAlive = true;
-      ws.on('pong', () => { (ws as any).isAlive = true; });
+      wsLiveness.set(ws, true);
+      ws.on('pong', () => { wsLiveness.set(ws, true); });
 
       // Authenticate remote (edge) clients
       if (!isLocal) {
@@ -204,6 +205,15 @@ const createWindow = async (): Promise<void> => {
           ws.close(4001, 'unauthorized');
           return;
         }
+
+        // Protocol version negotiation — reject incompatible edge clients
+        const clientVersion = parseInt(url.searchParams.get('v') || '', 10);
+        if (isNaN(clientVersion) || clientVersion < MIN_WS_PROTOCOL_VERSION || clientVersion > WS_PROTOCOL_VERSION) {
+          console.log(`[WS] Rejected client with incompatible protocol version: ${clientVersion || 'none'} (expected ${MIN_WS_PROTOCOL_VERSION}–${WS_PROTOCOL_VERSION})`);
+          ws.close(4002, `unsupported protocol version, expected ${MIN_WS_PROTOCOL_VERSION}-${WS_PROTOCOL_VERSION}`);
+          return;
+        }
+
         touchDevice(device);
         connectedDeviceId = device.id;
         connectedDeviceName = device.name;
@@ -217,50 +227,26 @@ const createWindow = async (): Promise<void> => {
       }
 
       // Handle incoming messages from edge devices (bidirectional protocol)
+      const ctx: WsConnectionContext = {
+        get connectedDeviceId() { return connectedDeviceId; },
+        get connectedDeviceName() { return connectedDeviceName; },
+        ws,
+      };
+
       ws.on('message', (raw, isBinary) => {
         // Binary frames are routed to active reverse-streaming requests
         if (isBinary) {
           if (connectedDeviceId) {
-            handleEdgeBinaryFrame(connectedDeviceId, raw as Buffer);
+            handleEdgeBinaryFrame(connectedDeviceId, raw as Buffer, ws);
           }
           return;
         }
 
         try {
-          const msg: ClientWsMessage = JSON.parse(raw.toString());
-          switch (msg.type) {
-            case 'heartbeat':
-              if (msg.deviceId) {
-                heartbeatDevice(msg.deviceId);
-              }
-              break;
-            case 'ping':
-              // No-op — the WebSocket ping/pong handles liveness
-              break;
-
-            // Federation: edge device announces its local library
-            case 'edge-library':
-              if (connectedDeviceId) {
-                registerEdgeLibrary(connectedDeviceId, connectedDeviceName || msg.deviceId, ws, msg.songs, msg.syncing);
-              }
-              break;
-
-            // Federation: edge device sends incremental hash updates
-            case 'edge-library-update':
-              if (connectedDeviceId) {
-                updateEdgeLibraryHashes(connectedDeviceId, msg.updates);
-              }
-              break;
-
-            // Federation: edge device responds with audio metadata
-            case 'edge-audio-response':
-              handleEdgeAudioResponse(msg.requestId, msg.mimeType, msg.fileSize);
-              break;
-
-            // Federation: edge device responds with album art
-            case 'edge-art-response':
-              handleEdgeArtResponse(msg.requestId, msg.data);
-              break;
+          const parsed = JSON.parse(raw.toString());
+          const error = dispatchWsMessage(parsed, ctx);
+          if (error) {
+            logWsParseError(new Error(error));
           }
         } catch (err) {
           logWsParseError(err);
@@ -268,6 +254,7 @@ const createWindow = async (): Promise<void> => {
       });
 
       ws.on('close', (code) => {
+        wsLiveness.delete(ws);
         if (connectedDeviceId) {
           deviceWebSockets.delete(connectedDeviceId);
           if (code !== 4001) {
@@ -300,12 +287,13 @@ const createWindow = async (): Promise<void> => {
     // Ping all clients every 3s for liveness detection
     setInterval(() => {
       for (const client of wss!.clients) {
-        if (!(client as any).isAlive) {
+        if (!wsLiveness.get(client)) {
           console.log('[WS] Client failed ping, terminating');
+          wsLiveness.delete(client);
           client.terminate();
           continue;
         }
-        (client as any).isAlive = false;
+        wsLiveness.set(client, false);
         client.ping();
       }
     }, 3000);

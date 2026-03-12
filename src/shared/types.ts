@@ -7,6 +7,13 @@ export const AUDIO_PATH_PREFIX = '/api/audio/';
 /** Current WS protocol version. Bump when making breaking message changes. */
 export const WS_PROTOCOL_VERSION = 1;
 
+/**
+ * Minimum WS protocol version the host will accept from edge clients.
+ * Allows rolling upgrades: bump WS_PROTOCOL_VERSION for new features while
+ * keeping MIN_WS_PROTOCOL_VERSION at the oldest compatible version.
+ */
+export const MIN_WS_PROTOCOL_VERSION = 1;
+
 export interface SongOrigin {
   deviceId: string;
   deviceName: string;

@@ -4,6 +4,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import { PassThrough } from 'stream';
 import { app } from 'electron';
 import { WebSocket } from 'ws';
@@ -230,7 +231,7 @@ export async function streamAudioFromEdge(
     return false;
   }
 
-  const requestId = `${deviceId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestId = randomUUID();
   const tempPath = cachePath + '.tmp';
 
   // Ensure cache subdirectory exists
@@ -378,8 +379,10 @@ export function handleEdgeAudioResponse(requestId: string, mimeType: string, fil
 /**
  * Handle incoming binary WebSocket frame for an active stream.
  * Called from the WS message router when binary data arrives from an edge device.
+ * Applies backpressure: if the PassThrough buffer is full, pauses the WebSocket
+ * until the downstream consumers drain, preventing unbounded memory growth.
  */
-export function handleEdgeBinaryFrame(deviceId: string, data: Buffer): void {
+export function handleEdgeBinaryFrame(deviceId: string, data: Buffer, ws: WebSocket): void {
   const requestId = currentStreamingRequest.get(deviceId);
   if (!requestId) return;
 
@@ -396,8 +399,16 @@ export function handleEdgeBinaryFrame(deviceId: string, data: Buffer): void {
     currentStreamingRequest.delete(deviceId);
     pending.resolve();
   } else {
-    // Write chunk to PassThrough (which pipes to both HTTP response and cache file)
-    pending.passThrough.write(data);
+    // Write chunk to PassThrough (which pipes to both HTTP response and cache file).
+    // If write() returns false the internal buffer is full — pause the WebSocket
+    // to apply backpressure and resume once the buffer drains.
+    const ok = pending.passThrough.write(data);
+    if (!ok) {
+      ws.pause();
+      pending.passThrough.once('drain', () => {
+        ws.resume();
+      });
+    }
   }
 }
 
@@ -413,7 +424,7 @@ export function requestArtFromEdge(deviceId: string, localPath: string): Promise
     return Promise.resolve(null);
   }
 
-  const requestId = `art-${deviceId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestId = randomUUID();
 
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
