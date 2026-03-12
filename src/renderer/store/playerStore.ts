@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import axios from 'axios';
 import { Song, getApiBase, getAuthToken, getMediaUrl, clearConnection } from '../types/song';
-import { DeviceInfo, DeviceType, ServerPlaybackState, ServerWsMessage } from '../../shared/types';
-import { isElectron } from '../utils/platform';
+import { ClientWsMessage, DeviceInfo, DeviceType, ServerPlaybackState, ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
+import { isElectron, isCapacitor } from '../utils/platform';
 import { useLibraryStore } from './libraryStore';
+import { initLocalLibrary, handleLocalLibraryMessage, getLocalFileUrl } from '../services/localLibrary';
 
 // Re-export so components can import from the store
 export type { DeviceInfo };
@@ -59,6 +60,36 @@ function cleanupAllAudio(): void {
   b.pause(); b.src = '';
   preloadedTrackPath = null;
   gaplessTrackPath = null;
+}
+
+// --- Local-only playback for edge devices without server connection ---
+
+let localHistory: Song[] = [];
+
+/** True when this edge device should play locally (no server). */
+function isLocalOnlyMode(): boolean {
+  return isCapacitor() && useLibraryStore.getState().source === 'local';
+}
+
+/** Convert a song's server-style path to a local file URL for direct playback. */
+function getLocalAudioSrc(song: Song): string {
+  const localPath = decodeURIComponent(song.path.replace(AUDIO_PATH_PREFIX, ''));
+  return getLocalFileUrl(localPath);
+}
+
+/** Prebuffer the next song in local mode. */
+function prebufferNextLocal(queue: Song[]): void {
+  const nextSong = queue[0];
+  const preload = getPreloadAudio();
+  if (!nextSong) {
+    preload.src = '';
+    preloadedTrackPath = null;
+    return;
+  }
+  if (preloadedTrackPath === nextSong.path) return;
+  preload.src = getLocalAudioSrc(nextSong);
+  preload.currentTime = 0;
+  preloadedTrackPath = nextSong.path;
 }
 
 // Generate a stable device ID stored in localStorage
@@ -166,7 +197,17 @@ function applyServerState(
       // Track changed OR device just became active — (re)load audio
       gaplessTrackPath = null;
       if (newTrack) {
-        a.src = getMediaUrl(newTrack.path);
+        // Local playback shortcut: if this edge device owns the song, play directly
+        // from local file instead of streaming through the host.
+        const isOwnSong = isCapacitor() && newTrack.origin?.deviceId === deviceId;
+        if (isOwnSong) {
+          // Extract local path from the remote URL path
+          const parts = newTrack.path.split('/');
+          const encodedPath = parts[parts.length - 1];
+          a.src = getLocalFileUrl(decodeURIComponent(encodedPath));
+        } else {
+          a.src = getMediaUrl(newTrack.path);
+        }
         a.currentTime = server.estimatedPosition;
         if (isNowPlaying) a.play().catch(() => {});
       } else {
@@ -237,6 +278,27 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   thisDeviceId: deviceId,
 
   play: async (song, queue) => {
+    if (isLocalOnlyMode()) {
+      const current = get().currentTrack;
+      if (current) localHistory.push(current);
+      const a = getAudio();
+      a.src = getLocalAudioSrc(song);
+      a.currentTime = 0;
+      a.play().catch(() => {});
+      const upcoming = queue
+        ? (() => { const idx = queue.findIndex(s => s.path === song.path); return idx >= 0 ? queue.slice(idx + 1) : []; })()
+        : [];
+      set({
+        currentTrack: song,
+        isPlaying: true,
+        queue: upcoming,
+        hasHistory: localHistory.length > 0,
+        activeDeviceId: deviceId,
+        devices: [{ id: deviceId, name: getDeviceName(), type: getDeviceType(), lastSeen: Date.now() }],
+      });
+      prebufferNextLocal(upcoming);
+      return;
+    }
     try {
       let response;
       if (queue) {
@@ -256,6 +318,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   addToQueue: async (song) => {
+    if (isLocalOnlyMode()) {
+      set({ queue: [...get().queue, song] });
+      return;
+    }
     try {
       const response = await axios.post(`${getApiBase()}/api/playback/queue`, { song });
       applyServerState(response.data, set, get);
@@ -265,6 +331,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   pause: async () => {
+    if (isLocalOnlyMode()) {
+      getAudio().pause();
+      set({ isPlaying: false });
+      return;
+    }
     try {
       const response = await axios.post(`${getApiBase()}/api/playback/pause`);
       applyServerState(response.data, set, get);
@@ -274,6 +345,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   resume: async () => {
+    if (isLocalOnlyMode()) {
+      getAudio().play().catch(() => {});
+      set({ isPlaying: true });
+      return;
+    }
     try {
       const response = await axios.post(`${getApiBase()}/api/playback/resume`);
       applyServerState(response.data, set, get);
@@ -290,6 +366,29 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   next: async () => {
+    if (isLocalOnlyMode()) {
+      const { currentTrack, queue } = get();
+      if (currentTrack) localHistory.push(currentTrack);
+      const nextSong = queue[0];
+      if (nextSong) {
+        const a = getAudio();
+        a.src = getLocalAudioSrc(nextSong);
+        a.currentTime = 0;
+        a.play().catch(() => {});
+        const newQueue = queue.slice(1);
+        set({
+          currentTrack: nextSong,
+          isPlaying: true,
+          queue: newQueue,
+          hasHistory: localHistory.length > 0,
+        });
+        prebufferNextLocal(newQueue);
+      } else {
+        getAudio().pause();
+        set({ isPlaying: false, currentTrack: null });
+      }
+      return;
+    }
     try {
       const response = await axios.post(`${getApiBase()}/api/playback/skip`);
       applyServerState(response.data, set, get);
@@ -299,6 +398,29 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   prev: async () => {
+    if (isLocalOnlyMode()) {
+      const a = getAudio();
+      if (a.currentTime > 3) {
+        a.currentTime = 0;
+        set({ currentTime: 0 });
+        return;
+      }
+      const prevSong = localHistory.pop();
+      if (prevSong) {
+        const current = get().currentTrack;
+        const newQueue = current ? [current, ...get().queue] : get().queue;
+        a.src = getLocalAudioSrc(prevSong);
+        a.currentTime = 0;
+        a.play().catch(() => {});
+        set({
+          currentTrack: prevSong,
+          isPlaying: true,
+          queue: newQueue,
+          hasHistory: localHistory.length > 0,
+        });
+      }
+      return;
+    }
     const a = getAudio();
     // If more than 3 seconds in, restart current song
     if (isThisDeviceActive(get()) && a.currentTime > 3) {
@@ -319,6 +441,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   seek: async (time) => {
+    if (isLocalOnlyMode()) {
+      const a = getAudio();
+      a.currentTime = time;
+      set({ currentTime: time });
+      return;
+    }
     if (isThisDeviceActive(get())) {
       const a = getAudio();
       a.currentTime = time;
@@ -385,7 +513,7 @@ if (typeof window !== 'undefined') {
 
   function handleTimeUpdate(this: HTMLAudioElement) {
     if (this !== getAudio()) return; // ignore events from the preload element
-    if (!isThisDeviceActive(usePlayerStore.getState())) return;
+    if (!isLocalOnlyMode() && !isThisDeviceActive(usePlayerStore.getState())) return;
     if (!this.duration || isNaN(this.duration)) return;
     usePlayerStore.setState({
       currentTime: this.currentTime,
@@ -395,9 +523,17 @@ if (typeof window !== 'undefined') {
 
   function handleEnded(this: HTMLAudioElement) {
     if (this !== getAudio()) return;
-    if (!isThisDeviceActive(usePlayerStore.getState())) return;
 
     const state = usePlayerStore.getState();
+
+    // Local-only mode: advance queue entirely client-side
+    if (isLocalOnlyMode()) {
+      state.next();
+      return;
+    }
+
+    if (!isThisDeviceActive(state)) return;
+
     const nextSong = state.queue[0];
     const preload = getPreloadAudio();
 
@@ -425,7 +561,7 @@ if (typeof window !== 'undefined') {
 
   function handleLoadedMetadata(this: HTMLAudioElement) {
     if (this !== getAudio()) return;
-    if (!isThisDeviceActive(usePlayerStore.getState())) return;
+    if (!isLocalOnlyMode() && !isThisDeviceActive(usePlayerStore.getState())) return;
     usePlayerStore.setState({ duration: this.duration });
   }
 
@@ -502,6 +638,11 @@ if (typeof window !== 'undefined') {
       // but HTTP registration is needed for local (desktop) clients whose device ID
       // isn't known from the WebSocket connection alone.
       registerThisDevice();
+      // Clear local-only playback state when reconnecting to server
+      localHistory = [];
+      if (isCapacitor()) {
+        useLibraryStore.getState().switchToServerLibrary();
+      }
 
       // Send periodic heartbeats so the server doesn't prune this device
       // from the playback device list (DEVICE_TIMEOUT is 10s on the server).
@@ -511,6 +652,20 @@ if (typeof window !== 'undefined') {
           ws.send(JSON.stringify({ type: 'heartbeat', deviceId }));
         }
       }, 5000);
+
+      // Initialize local library service on Capacitor devices.
+      // Passes a send function that handles both JSON messages and binary ArrayBuffers.
+      if (isCapacitor()) {
+        const wsSender = (msg: ClientWsMessage | ArrayBuffer) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (msg instanceof ArrayBuffer) {
+            ws.send(msg);
+          } else {
+            ws.send(JSON.stringify(msg));
+          }
+        };
+        initLocalLibrary(wsSender, deviceId);
+      }
     });
 
     ws.addEventListener('message', async (event) => {
@@ -550,6 +705,26 @@ if (typeof window !== 'undefined') {
             useReindexStore.getState().setFound(msg.found);
             break;
           }
+          // Federation: edge device sync status (shown on host only)
+          case 'edge-sync-start': {
+            if (!isCapacitor()) {
+              const { useSyncStore } = await import('../components/SyncBanner');
+              useSyncStore.getState().startEdgeSync(msg.deviceName, msg.songCount);
+            }
+            break;
+          }
+          case 'edge-sync-done': {
+            if (!isCapacitor()) {
+              const { useSyncStore } = await import('../components/SyncBanner');
+              useSyncStore.getState().finishEdgeSync(msg.deviceName);
+            }
+            break;
+          }
+          // Federation: host requests audio/art from this edge device
+          case 'request-audio':
+          case 'request-art':
+            handleLocalLibraryMessage(msg);
+            break;
         }
       } catch {
         // Ignore malformed messages
@@ -583,22 +758,43 @@ if (typeof window !== 'undefined') {
         return;
       }
 
-      // Host disconnected — reset server-dependent state so the edge device
-      // doesn't display stale data.  The welcome message on reconnect will
-      // restore the real state.
+      // Host disconnected — reset server-dependent state.
+      // On Capacitor (edge) devices, fall back to local library for offline playback.
+      // If already in local-only mode, preserve playback state (don't flicker on reconnect attempts).
       registered = false;
-      usePlayerStore.setState({
-        currentTrack: null,
-        isPlaying: false,
-        queue: [],
-        hasHistory: false,
-        devices: [],
-        activeDeviceId: null,
-        currentTime: 0,
-        duration: 0,
-      });
-      useLibraryStore.setState({ songs: [], loading: false });
-      cleanupAllAudio();
+
+      if (isCapacitor() && useLibraryStore.getState().source === 'local') {
+        // Already in local-only mode from a previous disconnect — don't destroy
+        // playback state. Just ensure reconnect is scheduled.
+      } else if (isCapacitor()) {
+        // First disconnect on Capacitor: stop server-driven playback, switch to local library
+        usePlayerStore.setState({
+          currentTrack: null,
+          isPlaying: false,
+          queue: [],
+          hasHistory: false,
+          devices: [],
+          activeDeviceId: null,
+          currentTime: 0,
+          duration: 0,
+        });
+        cleanupAllAudio();
+        useLibraryStore.getState().switchToLocalLibrary();
+      } else {
+        // Desktop/web: clear everything
+        usePlayerStore.setState({
+          currentTrack: null,
+          isPlaying: false,
+          queue: [],
+          hasHistory: false,
+          devices: [],
+          activeDeviceId: null,
+          currentTime: 0,
+          duration: 0,
+        });
+        useLibraryStore.setState({ songs: [], loading: false });
+        cleanupAllAudio();
+      }
 
       // Reset interpolation anchors so the position doesn't keep ticking
       serverPositionAnchor = 0;
@@ -618,14 +814,22 @@ if (typeof window !== 'undefined') {
       clearTimeout(connectTimeout);
       if (!settled) {
         settled = true;
-        // Reset stale state (same as close handler — needed when close doesn't fire)
         registered = false;
-        usePlayerStore.setState({
-          currentTrack: null, isPlaying: false, queue: [], hasHistory: false,
-          devices: [], activeDeviceId: null, currentTime: 0, duration: 0,
-        });
-        useLibraryStore.setState({ songs: [], loading: false });
-        cleanupAllAudio();
+
+        // Only reset state if not already in local-only mode on Capacitor
+        const alreadyLocal = isCapacitor() && useLibraryStore.getState().source === 'local';
+        if (!alreadyLocal) {
+          usePlayerStore.setState({
+            currentTrack: null, isPlaying: false, queue: [], hasHistory: false,
+            devices: [], activeDeviceId: null, currentTime: 0, duration: 0,
+          });
+          if (isCapacitor()) {
+            useLibraryStore.getState().switchToLocalLibrary();
+          } else {
+            useLibraryStore.setState({ songs: [], loading: false });
+          }
+          cleanupAllAudio();
+        }
         serverPositionAnchor = 0;
         serverPositionTimestamp = 0;
         serverIsPlaying = false;
@@ -638,8 +842,10 @@ if (typeof window !== 'undefined') {
 
   // Poll every 10s as a fallback when WebSocket is disconnected.
   // Always re-register if pruned, even when WS is connected.
+  // Skip polling entirely when in local-only mode — server is unreachable.
   setInterval(() => {
     if (revoked) return;
+    if (isLocalOnlyMode()) return;
     if (!registered) registerThisDevice();
     if (wsConnected) return; // WebSocket handles real-time sync
     usePlayerStore.getState().syncFromServer();

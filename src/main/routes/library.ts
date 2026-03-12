@@ -3,30 +3,22 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { parseFile } from 'music-metadata';
-import { Song, ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
-import { SongRow } from '../database';
+import { ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
+import { mapHostSongRows } from '../../shared/federation';
 import { getAllSongs, hideSongByPath, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation } from '../database';
 import { indexLibrary } from '../indexer';
 import { MUSIC_DIR } from '../config';
 import { isLocalAddress } from '../auth';
+import {
+  getUnifiedLibrary,
+  streamAudioFromEdge,
+  requestArtFromEdge,
+  getAudioCachePath,
+  isEdgeDeviceOnline,
+} from '../federation';
 
 export interface LibraryRouterDeps {
   broadcastToClients: (message: ServerWsMessage) => void;
-}
-
-/** Map database rows to Song objects for API responses. */
-export function mapSongRows(rows: SongRow[]): Song[] {
-  return rows.map((row) => ({
-    title: row.title,
-    artist: row.artist,
-    album: row.album,
-    duration: row.duration,
-    trackNumber: row.track_number || 0,
-    path: `${AUDIO_PATH_PREFIX}${encodeURIComponent(row.file_path)}`,
-    art: row.has_art ? `/api/art/${encodeURIComponent(row.file_path)}` : null,
-    hash: row.hash || '',
-    hidden: row.hidden === 1,
-  }));
 }
 
 /** Validate that a resolved file path is within any registered media location. */
@@ -50,11 +42,11 @@ async function getIndexDirs(): Promise<string[]> {
 export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   const router = Router();
 
-  // GET /api/library — all songs from the database
+  // GET /api/library — unified library (host + edge devices, deduplicated)
   router.get('/library', async (_req: Request, res: Response) => {
     try {
-      const rows = await getAllSongs();
-      res.json(mapSongRows(rows));
+      const library = await getUnifiedLibrary();
+      res.json(library);
     } catch (err) {
       console.error('Failed to query library:', err);
       res.status(500).json({ error: 'Failed to load library' });
@@ -70,9 +62,8 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
     try {
       await hideSongByPath(songPath);
-      const rows = await getAllSongs();
-      const songs = mapSongRows(rows);
-      deps.broadcastToClients({ type: 'library', data: songs });
+      const library = await getUnifiedLibrary();
+      deps.broadcastToClients({ type: 'library', data: library });
       res.json({ ok: true });
     } catch (err) {
       console.error('Failed to hide song:', err);
@@ -90,7 +81,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
     try {
       const rows = await getAlbumSongs(artist, album);
-      res.json(mapSongRows(rows));
+      res.json(mapHostSongRows(rows));
     } catch (err) {
       console.error('Failed to get album songs:', err);
       res.status(500).json({ error: 'Failed to get album songs' });
@@ -109,9 +100,8 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         const diskPath = decodeURIComponent(songPath.replace(AUDIO_PATH_PREFIX, ''));
         await setSongHidden(diskPath, hidden);
       }
-      const rows = await getAllSongs();
-      const mapped = mapSongRows(rows);
-      deps.broadcastToClients({ type: 'library', data: mapped });
+      const library = await getUnifiedLibrary();
+      deps.broadcastToClients({ type: 'library', data: library });
       res.json({ ok: true });
     } catch (err) {
       console.error('Failed to set hidden state:', err);
@@ -126,9 +116,9 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       await indexLibrary(dirs, (found) => {
         deps.broadcastToClients({ type: 'reindex-progress', found });
       });
-      const rows = await getAllSongs();
-      deps.broadcastToClients({ type: 'library', data: mapSongRows(rows) });
-      res.json({ indexed: rows.length });
+      const library = await getUnifiedLibrary();
+      deps.broadcastToClients({ type: 'library', data: library });
+      res.json({ indexed: library.length });
     } catch (err) {
       console.error('Failed to reindex:', err);
       res.status(500).json({ error: 'Failed to reindex' });
@@ -164,8 +154,8 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       indexLibrary(dirs, (found) => {
         deps.broadcastToClients({ type: 'reindex-progress', found });
       }).then(async () => {
-        const rows = await getAllSongs();
-        deps.broadcastToClients({ type: 'library', data: mapSongRows(rows) });
+        const library = await getUnifiedLibrary();
+        deps.broadcastToClients({ type: 'library', data: library });
       }).catch(err => console.error('Reindex after add failed:', err));
       const locations = await getMediaLocations();
       res.json(locations);
@@ -190,8 +180,8 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       // removeMediaLocation also deletes songs under that directory
       await removeMediaLocation(locationPath);
       // Broadcast the updated library immediately
-      const rows = await getAllSongs();
-      deps.broadcastToClients({ type: 'library', data: mapSongRows(rows) });
+      const library = await getUnifiedLibrary();
+      deps.broadcastToClients({ type: 'library', data: library });
       const locations = await getMediaLocations();
       res.json(locations);
     } catch (err) {
@@ -293,6 +283,87 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     } else {
       res.writeHead(200, { 'Content-Type': contentType });
       fs.createReadStream(filePath).pipe(res);
+    }
+  });
+
+  // GET /api/audio/remote/:deviceId/:file — stream audio from an edge device (reverse streaming)
+  router.get('/audio/remote/:deviceId/:file', async (req: Request, res: Response) => {
+    const { deviceId, file } = req.params;
+    const localPath = decodeURIComponent(file);
+
+    // Try cache first
+    const cachePath = getAudioCachePath(deviceId, localPath);
+    if (fs.existsSync(cachePath)) {
+      // Serve from cache using standard file streaming with Range support
+      const stat = fs.statSync(cachePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+      const contentType = 'audio/mpeg'; // Cached files — mime unknown, default to mpeg
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunkSize = end - start + 1;
+        const stream = fs.createReadStream(cachePath, { start, end });
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': contentType,
+        });
+        stream.pipe(res);
+      } else {
+        res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': fileSize });
+        fs.createReadStream(cachePath).pipe(res);
+      }
+      return;
+    }
+
+    // Not cached — check if device is online
+    if (!isEdgeDeviceOnline(deviceId)) {
+      res.status(503).json({ error: 'Edge device is offline and file is not cached' });
+      return;
+    }
+
+    // Stream from edge device (stream-as-it-arrives)
+    try {
+      const handled = await streamAudioFromEdge(deviceId, localPath, res);
+      if (!handled) {
+        // streamAudioFromEdge returned false — device went offline or error
+        if (!res.headersSent) {
+          res.status(503).json({ error: 'Failed to stream from edge device' });
+        }
+      }
+    } catch (err) {
+      console.error('[Federation] Remote audio stream error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Stream error' });
+      }
+    }
+  });
+
+  // GET /api/art/remote/:deviceId/:file — get album art from an edge device
+  router.get('/art/remote/:deviceId/:file', async (req: Request, res: Response) => {
+    const { deviceId, file } = req.params;
+    const localPath = decodeURIComponent(file);
+
+    try {
+      const base64Data = await requestArtFromEdge(deviceId, localPath);
+      if (base64Data) {
+        const buffer = Buffer.from(base64Data, 'base64');
+        // Try to detect image type from base64 header
+        const isJpeg = base64Data.startsWith('/9j/');
+        const isPng = base64Data.startsWith('iVBOR');
+        const contentType = isPng ? 'image/png' : isJpeg ? 'image/jpeg' : 'image/jpeg';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.send(buffer);
+      } else {
+        res.status(404).send('No artwork');
+      }
+    } catch {
+      res.status(502).send('Failed to fetch artwork from edge device');
     }
   });
 

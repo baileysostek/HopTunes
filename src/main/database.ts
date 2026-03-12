@@ -1,22 +1,32 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { app } from 'electron';
+import {
+  SongRow,
+  CREATE_SONGS_TABLE,
+  CREATE_SONGS_FILE_PATH_INDEX,
+  CREATE_SONGS_HASH_INDEX,
+  CREATE_MEDIA_LOCATIONS_TABLE,
+  UPSERT_SONG_SQL,
+  GET_ALL_SONGS_SQL,
+  GET_ALL_SONGS_INCLUDING_HIDDEN_SQL,
+  RESET_HIDDEN_SQL,
+  MARK_DUPLICATES_HIDDEN_SQL,
+  HIDE_SONG_BY_PATH_SQL,
+  SET_SONG_HIDDEN_SQL,
+  GET_ALBUM_SONGS_SQL,
+  GET_SONG_MODIFIED_AT_SQL,
+  GET_ALL_FILE_PATHS_SQL,
+  DELETE_SONG_BY_PATH_SQL,
+  GET_MEDIA_LOCATIONS_SQL,
+  ADD_MEDIA_LOCATION_SQL,
+  DELETE_MEDIA_LOCATION_SQL,
+} from '../shared/db-schema';
+
+// Re-export SongRow so existing imports from './database' still work
+export type { SongRow } from '../shared/db-schema';
 
 let db: sqlite3.Database | null = null;
-
-export interface SongRow {
-  id: number;
-  file_path: string;
-  title: string;
-  artist: string;
-  album: string;
-  duration: number | null;
-  has_art: number;
-  track_number: number;
-  file_modified_at: number;
-  hash: string;
-  hidden: number; // SQLite stores booleans as 0/1
-}
 
 function run(sql: string, params: unknown[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -56,23 +66,9 @@ export async function initDatabase(): Promise<void> {
         return;
       }
       try {
-        await run(`
-          CREATE TABLE IF NOT EXISTS songs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path TEXT UNIQUE NOT NULL,
-            title TEXT NOT NULL,
-            artist TEXT NOT NULL,
-            album TEXT NOT NULL,
-            duration REAL,
-            has_art INTEGER NOT NULL DEFAULT 0,
-            file_modified_at INTEGER NOT NULL,
-            track_number INTEGER DEFAULT 0,
-            hash TEXT NOT NULL DEFAULT '',
-            hidden INTEGER NOT NULL DEFAULT 0
-          )
-        `);
-        await run(`CREATE INDEX IF NOT EXISTS idx_songs_file_path ON songs(file_path)`);
-        await run(`CREATE INDEX IF NOT EXISTS idx_songs_hash ON songs(hash)`);
+        await run(CREATE_SONGS_TABLE);
+        await run(CREATE_SONGS_FILE_PATH_INDEX);
+        await run(CREATE_SONGS_HASH_INDEX);
         await run(`
           CREATE TABLE IF NOT EXISTS artist_images (
             artist TEXT PRIMARY KEY NOT NULL,
@@ -88,12 +84,7 @@ export async function initDatabase(): Promise<void> {
             PRIMARY KEY (artist, album)
           )
         `);
-        await run(`
-          CREATE TABLE IF NOT EXISTS media_locations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            path TEXT UNIQUE NOT NULL
-          )
-        `);
+        await run(CREATE_MEDIA_LOCATIONS_TABLE);
         resolve();
       } catch (e) {
         reject(e);
@@ -103,25 +94,14 @@ export async function initDatabase(): Promise<void> {
 }
 
 export async function upsertSong(song: Omit<SongRow, 'id' | 'hidden'>): Promise<void> {
-  await run(
-    `INSERT INTO songs (file_path, title, artist, album, duration, has_art, file_modified_at, track_number, hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(file_path) DO UPDATE SET
-       title = excluded.title,
-       artist = excluded.artist,
-       album = excluded.album,
-       duration = excluded.duration,
-       has_art = excluded.has_art,
-       file_modified_at = excluded.file_modified_at,
-       track_number = excluded.track_number,
-       hash = excluded.hash`,
-    [song.file_path, song.title, song.artist, song.album, song.duration, song.has_art, song.file_modified_at, song.track_number, song.hash]
-  );
+  await run(UPSERT_SONG_SQL, [
+    song.file_path, song.title, song.artist, song.album,
+    song.duration, song.has_art, song.file_modified_at, song.track_number, song.hash,
+  ]);
 }
 
 export async function getAllSongs(includeHidden = false): Promise<SongRow[]> {
-  const where = includeHidden ? '' : 'WHERE hidden = 0';
-  return all<SongRow>(`SELECT * FROM songs ${where} ORDER BY artist, album, track_number, title`);
+  return all<SongRow>(includeHidden ? GET_ALL_SONGS_INCLUDING_HIDDEN_SQL : GET_ALL_SONGS_SQL);
 }
 
 /**
@@ -130,44 +110,29 @@ export async function getAllSongs(includeHidden = false): Promise<SongRow[]> {
  * hash are never hidden (we can't determine duplicates without a hash).
  */
 export async function markDuplicatesHidden(): Promise<number> {
-  // First, reset all songs to visible
-  await run('UPDATE songs SET hidden = 0');
-  // Then hide duplicates: any song whose hash is non-empty and whose id
-  // is NOT the minimum id for that hash
-  const result = await runWithChanges(
-    `UPDATE songs SET hidden = 1
-     WHERE hash != ''
-       AND id NOT IN (
-         SELECT MIN(id) FROM songs WHERE hash != '' GROUP BY hash
-       )`
-  );
+  await run(RESET_HIDDEN_SQL);
+  const result = await runWithChanges(MARK_DUPLICATES_HIDDEN_SQL);
   return result.changes;
 }
 
 export async function hideSongByPath(filePath: string): Promise<void> {
-  await run('UPDATE songs SET hidden = 1 WHERE file_path = ?', [filePath]);
+  await run(HIDE_SONG_BY_PATH_SQL, [filePath]);
 }
 
 export async function setSongHidden(filePath: string, hidden: boolean): Promise<void> {
-  await run('UPDATE songs SET hidden = ? WHERE file_path = ?', [hidden ? 1 : 0, filePath]);
+  await run(SET_SONG_HIDDEN_SQL, [hidden ? 1 : 0, filePath]);
 }
 
 export async function getAlbumSongs(artist: string, album: string): Promise<SongRow[]> {
-  return all<SongRow>(
-    'SELECT * FROM songs WHERE artist = ? AND album = ? ORDER BY track_number, title',
-    [artist, album]
-  );
+  return all<SongRow>(GET_ALBUM_SONGS_SQL, [artist, album]);
 }
 
 export async function getSongModifiedAt(filePath: string): Promise<number | null> {
-  const rows = await all<{ file_modified_at: number }>(
-    'SELECT file_modified_at FROM songs WHERE file_path = ?',
-    [filePath]
-  );
+  const rows = await all<{ file_modified_at: number }>(GET_SONG_MODIFIED_AT_SQL, [filePath]);
   return rows.length > 0 ? rows[0].file_modified_at : null;
 }
 
-// --- Artist image cache ---
+// --- Artist image cache (host-only) ---
 
 const ARTIST_IMAGE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -189,7 +154,7 @@ export async function cacheArtistImage(artist: string, data: string): Promise<vo
   );
 }
 
-// --- Album art cache (permanent, no TTL) ---
+// --- Album art cache (host-only, permanent, no TTL) ---
 
 export async function getCachedAlbumArt(artist: string, album: string): Promise<string | null | undefined> {
   const rows = await all<{ thumb_url: string | null }>(
@@ -211,19 +176,16 @@ export async function cacheAlbumArt(artist: string, album: string, thumbUrl: str
 // --- Media locations ---
 
 export async function getMediaLocations(): Promise<string[]> {
-  const rows = await all<{ path: string }>('SELECT path FROM media_locations ORDER BY id');
+  const rows = await all<{ path: string }>(GET_MEDIA_LOCATIONS_SQL);
   return rows.map(r => r.path);
 }
 
 export async function addMediaLocation(locationPath: string): Promise<void> {
-  await run(
-    'INSERT OR IGNORE INTO media_locations (path) VALUES (?)',
-    [locationPath]
-  );
+  await run(ADD_MEDIA_LOCATION_SQL, [locationPath]);
 }
 
 export async function removeMediaLocation(locationPath: string): Promise<void> {
-  await run('DELETE FROM media_locations WHERE path = ?', [locationPath]);
+  await run(DELETE_MEDIA_LOCATION_SQL, [locationPath]);
   // Remove all songs whose file path falls under the removed directory
   const prefix = locationPath.endsWith('/') || locationPath.endsWith('\\') ? locationPath : locationPath + path.sep;
   await run('DELETE FROM songs WHERE file_path LIKE ? ESCAPE ?', [
@@ -233,11 +195,11 @@ export async function removeMediaLocation(locationPath: string): Promise<void> {
 }
 
 export async function removeDeletedSongs(existingPaths: Set<string>): Promise<number> {
-  const allSongs = await all<{ file_path: string }>('SELECT file_path FROM songs');
+  const allSongs = await all<{ file_path: string }>(GET_ALL_FILE_PATHS_SQL);
   let removed = 0;
   for (const song of allSongs) {
     if (!existingPaths.has(song.file_path)) {
-      await run('DELETE FROM songs WHERE file_path = ?', [song.file_path]);
+      await run(DELETE_SONG_BY_PATH_SQL, [song.file_path]);
       removed++;
     }
   }

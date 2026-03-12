@@ -11,6 +11,7 @@ import SongContextMenu from './SongContextMenu';
 import AlbumContextMenu from './AlbumContextMenu';
 import AlbumEditModal from './AlbumEditModal';
 import ReindexOverlay from './ReindexOverlay';
+import SyncBanner from './SyncBanner';
 import { isElectron, isMobile } from '../utils/platform';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -53,6 +54,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
         {/* Main content */}
         <SearchBar onMenuClick={openSidebar} />
+        <SyncBanner />
         <Box sx={{ flex: 1, overflow: 'auto', contain: 'strict' }}>
           {children}
         </Box>
@@ -82,6 +84,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <Sidebar onConnectClick={showConnect ? openConnectModal : undefined} onSettingsClick={openSettingsModal} />
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <SearchBar />
+          <SyncBanner />
           <Box sx={{ flex: 1, overflow: 'auto', contain: 'strict', pr: 1 }}>
             {children}
           </Box>

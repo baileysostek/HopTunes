@@ -9,7 +9,7 @@ npx cap sync android
 
 echo "==> Building APK..."
 cd android
-JAVA_HOME="C:/Users/Bailey Sostek/.jdks/openjdk-25.0.1" ./gradlew.bat assembleDebug
+JAVA_HOME="C:/Users/Bailey Sostek/.jdks/openjdk-22.0.1" ./gradlew.bat assembleDebug
 cd ..
 
 echo "==> Installing on device..."

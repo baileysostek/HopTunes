@@ -4,6 +4,12 @@
 /** URL prefix used for audio streaming endpoints. */
 export const AUDIO_PATH_PREFIX = '/api/audio/';
 
+export interface SongOrigin {
+  deviceId: string;
+  deviceName: string;
+  available: boolean;
+}
+
 export interface Song {
   title: string;
   artist: string;
@@ -14,6 +20,22 @@ export interface Song {
   art: string | null;
   hash: string;
   hidden: boolean;
+  /** undefined = host-local (backward compatible). Present = from an edge device. */
+  origin?: SongOrigin;
+}
+
+/** Metadata sent from an edge device to the host to announce its local library. */
+export interface EdgeSongMeta {
+  localPath: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number | null;
+  trackNumber: number;
+  hash: string;
+  hasArt: boolean;
+  mimeType: string;
+  fileSize: number;
 }
 
 export type DeviceType = 'desktop' | 'mobile' | 'web';
@@ -46,8 +68,20 @@ export type ServerWsMessage =
   | { type: 'welcome'; state: ServerPlaybackState; library: Song[] }
   | { type: 'state'; data: ServerPlaybackState }
   | { type: 'library'; data: Song[] }
-  | { type: 'reindex-progress'; found: number };
+  | { type: 'reindex-progress'; found: number }
+  // Federation: host notifies clients about edge device sync status
+  | { type: 'edge-sync-start'; deviceName: string; songCount: number }
+  | { type: 'edge-sync-done'; deviceName: string }
+  // Federation: host asks edge device for audio/art
+  | { type: 'request-audio'; requestId: string; localPath: string }
+  | { type: 'request-art'; requestId: string; localPath: string };
 
 export type ClientWsMessage =
   | { type: 'ping' }
-  | { type: 'heartbeat'; deviceId: string };
+  | { type: 'heartbeat'; deviceId: string }
+  // Federation: edge device announces its library
+  | { type: 'edge-library'; deviceId: string; songs: EdgeSongMeta[]; syncing?: boolean }
+  | { type: 'edge-library-update'; deviceId: string; updates: { localPath: string; hash: string }[] }
+  // Federation: edge device responds to host requests
+  | { type: 'edge-audio-response'; requestId: string; mimeType: string; fileSize: number }
+  | { type: 'edge-art-response'; requestId: string; data: string | null };

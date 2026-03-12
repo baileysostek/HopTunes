@@ -1,15 +1,26 @@
 import { app, BrowserWindow, Menu, session } from 'electron';
 import { setupIpcHandlers } from './api';
-import { initDatabase, getAllSongs, getMediaLocations, addMediaLocation } from './database';
+import { initDatabase, getMediaLocations, addMediaLocation } from './database';
 import { indexLibrary } from './indexer';
 import { getPlaybackState, onStateChange, removeDevice as removePlaybackDevice, broadcastState, registerDevice as registerPlaybackDevice, heartbeatDevice } from './playback';
 import { isLocalAddress, validateDeviceToken, touchDevice, flushDeviceRegistry } from './auth';
 import { PORT, MUSIC_DIR, buildCsp } from './config';
 import { ClientWsMessage, ServerWsMessage } from '../shared/types';
+import {
+  setFederationBroadcast,
+  registerEdgeLibrary,
+  updateEdgeDeviceWs,
+  updateEdgeLibraryHashes,
+  unregisterEdgeDevice,
+  getUnifiedLibraryNow,
+  handleEdgeAudioResponse,
+  handleEdgeBinaryFrame,
+  handleEdgeArtResponse,
+} from './federation';
 
 import playbackRouter from './routes/playback';
 import { createConnectRouter } from './routes/connect';
-import { createLibraryRouter, mapSongRows } from './routes/library';
+import { createLibraryRouter } from './routes/library';
 
 import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -152,13 +163,17 @@ const createWindow = async (): Promise<void> => {
   try {
     // @ts-ignore - @types/node v24 generics incompatible with TS 4.5
     const server = http.createServer(expressApp);
-    wss = new WebSocketServer({ server });
+    wss = new WebSocketServer({ server, perMessageDeflate: true });
+
+    // Wire federation broadcast so it can push unified library updates
+    setFederationBroadcast(broadcastToClients);
 
     wss.on('connection', (ws, req) => {
       const addr = req.socket.remoteAddress;
       const isLocal = isLocalAddress(addr);
       console.log(`[WS] Client connected from ${addr} (local: ${isLocal}), total: ${wss!.clients.size}`);
       let connectedDeviceId: string | null = null;
+      let connectedDeviceName: string | null = null;
 
       (ws as any).isAlive = true;
       ws.on('pong', () => { (ws as any).isAlive = true; });
@@ -175,13 +190,26 @@ const createWindow = async (): Promise<void> => {
         }
         touchDevice(device);
         connectedDeviceId = device.id;
+        connectedDeviceName = device.name;
         deviceWebSockets.set(device.id, ws);
         registerPlaybackDevice(device.id, device.name, device.type);
+        updateEdgeDeviceWs(device.id, ws);
         broadcastState();
+
+        // Show sync banner immediately — edge device will scan and send its library
+        broadcastToClients({ type: 'edge-sync-start', deviceName: device.name, songCount: 0 });
       }
 
       // Handle incoming messages from edge devices (bidirectional protocol)
-      ws.on('message', (raw) => {
+      ws.on('message', (raw, isBinary) => {
+        // Binary frames are routed to active reverse-streaming requests
+        if (isBinary) {
+          if (connectedDeviceId) {
+            handleEdgeBinaryFrame(connectedDeviceId, raw as Buffer);
+          }
+          return;
+        }
+
         try {
           const msg: ClientWsMessage = JSON.parse(raw.toString());
           switch (msg.type) {
@@ -192,6 +220,30 @@ const createWindow = async (): Promise<void> => {
               break;
             case 'ping':
               // No-op — the WebSocket ping/pong handles liveness
+              break;
+
+            // Federation: edge device announces its local library
+            case 'edge-library':
+              if (connectedDeviceId) {
+                registerEdgeLibrary(connectedDeviceId, connectedDeviceName || msg.deviceId, ws, msg.songs, msg.syncing);
+              }
+              break;
+
+            // Federation: edge device sends incremental hash updates
+            case 'edge-library-update':
+              if (connectedDeviceId) {
+                updateEdgeLibraryHashes(connectedDeviceId, msg.updates);
+              }
+              break;
+
+            // Federation: edge device responds with audio metadata
+            case 'edge-audio-response':
+              handleEdgeAudioResponse(msg.requestId, msg.mimeType, msg.fileSize);
+              break;
+
+            // Federation: edge device responds with album art
+            case 'edge-art-response':
+              handleEdgeArtResponse(msg.requestId, msg.data);
               break;
           }
         } catch {
@@ -204,6 +256,7 @@ const createWindow = async (): Promise<void> => {
           deviceWebSockets.delete(connectedDeviceId);
           if (code !== 4001) {
             removePlaybackDevice(connectedDeviceId);
+            unregisterEdgeDevice(connectedDeviceId);
             broadcastState();
           }
         }
@@ -213,12 +266,12 @@ const createWindow = async (): Promise<void> => {
       // Send welcome message with full state + library
       (async () => {
         try {
-          const rows = await getAllSongs();
+          const library = await getUnifiedLibraryNow();
           if (ws.readyState !== WebSocket.OPEN) return;
           const welcome: ServerWsMessage = {
             type: 'welcome',
             state: getPlaybackState(),
-            library: mapSongRows(rows),
+            library,
           };
           ws.send(JSON.stringify(welcome));
         } catch (err) {

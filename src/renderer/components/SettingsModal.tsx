@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Typography, Button, IconButton } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import { isElectron } from '../utils/platform';
+import { isElectron, isCapacitor } from '../utils/platform';
 import { getApiBase, setApiBase, setAuthToken } from '../types/song';
 import { useThemeStore, ACCENT_PRESETS, ThemeMode } from '../store/themeStore';
 import axios from 'axios';
@@ -367,9 +367,12 @@ const AddIcon = () => (
 const LibraryTab = () => {
   const theme = useTheme();
   const [locations, setLocations] = useState<string[]>([]);
+  const [localLocations, setLocalLocations] = useState<string[]>([]);
   const [serverName, setServerName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [reindexing, setReindexing] = useState(false);
+  const [localScanning, setLocalScanning] = useState(false);
+  const [localSongCount, setLocalSongCount] = useState<number | null>(null);
 
   const fetchLocations = useCallback(async () => {
     try {
@@ -383,9 +386,63 @@ const LibraryTab = () => {
     }
   }, []);
 
+  const fetchLocalLocations = useCallback(async () => {
+    if (!isCapacitor()) return;
+    try {
+      const { getMediaLocations, getLocalSongs } = await import('../services/localLibrary');
+      const locs = await getMediaLocations();
+      setLocalLocations(locs);
+      const songs = getLocalSongs();
+      if (songs.length > 0) setLocalSongCount(songs.length);
+    } catch {
+      // Silent fail
+    }
+  }, []);
+
   useEffect(() => {
     fetchLocations();
-  }, [fetchLocations]);
+    fetchLocalLocations();
+  }, [fetchLocations, fetchLocalLocations]);
+
+  const handleScanLocalMusic = async () => {
+    setLocalScanning(true);
+    try {
+      const { scanLocalLibrary } = await import('../services/localLibrary');
+      const count = await scanLocalLibrary();
+      setLocalSongCount(count);
+    } catch (err) {
+      console.error('Failed to scan local music:', err);
+    } finally {
+      setLocalScanning(false);
+    }
+  };
+
+  const handleAddLocalFolder = async () => {
+    try {
+      const { selectMusicFolder } = await import('../services/localLibrary');
+      const path = await selectMusicFolder();
+      if (path) {
+        setLocalLocations(prev => prev.includes(path) ? prev : [...prev, path]);
+        // Auto-scan after adding a folder
+        handleScanLocalMusic();
+      }
+    } catch (err) {
+      console.error('Failed to select folder:', err);
+    }
+  };
+
+  const handleRemoveLocalFolder = async (folderPath: string) => {
+    try {
+      const { removeMusicFolder, scanLocalLibrary } = await import('../services/localLibrary');
+      await removeMusicFolder(folderPath);
+      setLocalLocations(prev => prev.filter(l => l !== folderPath));
+      // Re-scan with remaining folders
+      const count = await scanLocalLibrary();
+      setLocalSongCount(count);
+    } catch {
+      // Silent fail
+    }
+  };
 
   const handleAddFolder = async () => {
     if (isElectron()) {
@@ -422,8 +479,127 @@ const LibraryTab = () => {
 
   return (
     <Box>
+      {isCapacitor() && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+            Select folders on this device containing music. Songs are shared with the host when connected.
+          </Typography>
+
+          {/* Local folder list */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
+            {localLocations.map((loc) => (
+              <Box
+                key={loc}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  bgcolor: 'action.hover',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                  px: 2,
+                  py: 1.5,
+                  '&:hover': { bgcolor: 'action.selected' },
+                }}
+              >
+                <Box sx={{ color: 'text.secondary', display: 'flex' }}>
+                  <FolderIcon />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography sx={{
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: 'text.primary',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {loc.split('/').pop() || loc}
+                  </Typography>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {loc}
+                  </Typography>
+                </Box>
+                <IconButton
+                  size="small"
+                  onClick={() => handleRemoveLocalFolder(loc)}
+                  sx={{
+                    color: 'text.disabled',
+                    '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) },
+                  }}
+                  title="Remove folder"
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </Box>
+            ))}
+
+            {localLocations.length === 0 && (
+              <Box sx={{
+                bgcolor: 'action.hover',
+                border: '1px dashed',
+                borderColor: 'divider',
+                borderRadius: 2,
+                p: 2,
+                textAlign: 'center',
+              }}>
+                <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
+                  No folders selected. Add a folder to scan for music.
+                </Typography>
+              </Box>
+            )}
+          </Box>
+
+          {/* Local action buttons */}
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleAddLocalFolder}
+              startIcon={<AddIcon />}
+              sx={{
+                color: 'text.primary',
+                borderColor: 'divider',
+                '&:hover': { borderColor: 'text.secondary', bgcolor: 'action.hover' },
+                textTransform: 'none',
+                fontSize: 13,
+              }}
+            >
+              Add Folder
+            </Button>
+            {localLocations.length > 0 && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleScanLocalMusic}
+                disabled={localScanning}
+                startIcon={<RefreshIcon />}
+                sx={{
+                  color: 'primary.main',
+                  borderColor: alpha(theme.palette.primary.main, 0.3),
+                  '&:hover': { borderColor: theme.palette.primary.main, bgcolor: alpha(theme.palette.primary.main, 0.08) },
+                  textTransform: 'none',
+                  fontSize: 13,
+                }}
+              >
+                {localScanning ? 'Scanning...' : 'Rescan'}
+              </Button>
+            )}
+          </Box>
+          {localSongCount !== null && (
+            <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 1 }}>
+              {localSongCount} songs found
+            </Typography>
+          )}
+        </Box>
+      )}
+
+      {/* Server folders section */}
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-        Folders that OpenTunes scans for music. Adding or removing a folder will automatically reindex your library.
+        {isCapacitor()
+          ? 'Folders on the host server that are shared with all devices.'
+          : 'Folders that OpenTunes scans for music. Adding or removing a folder will automatically reindex your library.'}
       </Typography>
 
       {loading ? (
@@ -438,7 +614,7 @@ const LibraryTab = () => {
           textAlign: 'center',
         }}>
           <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
-            No media locations configured. Add a folder to get started.
+            No media locations configured{isElectron() ? '. Add a folder to get started.' : ' on the host.'}
           </Typography>
         </Box>
       ) : (
@@ -670,7 +846,7 @@ const ThemesTab = () => {
           return (
             <Box
               key={preset.value}
-              onClick={() => { setPickerOpen(false); setAccent(preset.value); }}
+              onClick={() => { setAccent(preset.value); }}
               sx={{
                 display: 'flex',
                 alignItems: 'center',

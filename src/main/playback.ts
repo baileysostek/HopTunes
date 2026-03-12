@@ -210,6 +210,37 @@ export function moveInQueue(fromIndex: number, toIndex: number): boolean {
   return true;
 }
 
+// --- Resilience ---
+
+/**
+ * Handle the case where the current song's source device has gone offline
+ * and the file is not cached. If the same hash exists on another source
+ * (another edge device or the host), swap the path. Otherwise, skip to next.
+ */
+export function handleSongSourceLost(
+  deviceId: string,
+  findAlternative: (hash: string, excludeDeviceId: string) => Song | null,
+): void {
+  if (!state.currentSong) return;
+  if (!state.currentSong.origin || state.currentSong.origin.deviceId !== deviceId) return;
+
+  // Try to find an alternative source for the same song (by hash)
+  if (state.currentSong.hash) {
+    const alt = findAlternative(state.currentSong.hash, deviceId);
+    if (alt) {
+      state.currentSong = alt;
+      state.updatedAt = Date.now();
+      broadcastState();
+      return;
+    }
+  }
+
+  // No alternative — skip to next
+  console.log(`[Playback] Song source lost (device ${deviceId}), skipping to next`);
+  skipNext();
+  broadcastState();
+}
+
 // --- WebSocket broadcast ---
 
 type StateListener = () => void;
