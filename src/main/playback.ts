@@ -53,11 +53,13 @@ export function removeDevice(id: string): void {
   }
 }
 
-export function heartbeatDevice(id: string): void {
+export function heartbeatDevice(id: string): boolean {
   const device = devices.get(id);
   if (device) {
     device.lastSeen = Date.now();
+    return true;
   }
+  return false;
 }
 
 export function getDevices(): DeviceInfo[] {
@@ -211,6 +213,18 @@ export function moveInQueue(fromIndex: number, toIndex: number): boolean {
 }
 
 // --- Resilience ---
+
+/**
+ * Handle the case where the current song's source device has gone offline
+ * and the file is not cached. If the same hash exists on another source
+ * (another edge device or the host), swap the path. Otherwise, skip to next.
+ */
+/**
+ * Remove all queued songs sourced from the given device.
+ */
+export function purgeDeviceFromQueue(deviceId: string): void {
+  state.queue = state.queue.filter(s => s.origin?.deviceId !== deviceId);
+}
 
 /**
  * Handle the case where the current song's source device has gone offline

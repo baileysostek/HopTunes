@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Tooltip } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { Song } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
@@ -82,14 +82,15 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) 
         {track.title}
       </Typography>
       {!mobile && (
-        <Typography sx={{
-          fontSize: 11,
-          ml: 2,
-          color: 'text.disabled',
-          fontFamily: 'monospace',
-        }}>
-          {track.hash?.slice(0, 8)}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
+          <Typography sx={{
+            fontSize: 11,
+            color: 'text.disabled',
+            fontFamily: 'monospace',
+          }}>
+            {track.hash?.slice(0, 8)}
+          </Typography>
+        </Box>
       )}
       <Typography sx={{
         fontSize: 13,
@@ -99,6 +100,17 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) 
       }}>
         {formatDuration(track.duration)}
       </Typography>
+      <Box sx={{ width: 21, ml: 1, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
+        {track.origin && (
+          <Tooltip title={track.origin.deviceName} arrow placement="top">
+            <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', color: 'text.disabled' }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+              </svg>
+            </Box>
+          </Tooltip>
+        )}
+      </Box>
     </Box>
   );
 };

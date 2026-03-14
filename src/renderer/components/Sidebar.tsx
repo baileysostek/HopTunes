@@ -3,6 +3,21 @@ import { Box, Typography, List, ListItemButton, ListItemText } from '@mui/materi
 import { useNavigate } from 'react-router-dom';
 import { useLibraryStore } from '../store/libraryStore';
 import { getMediaUrl } from '../types/song';
+import { useCachedArt } from '../hooks/useCachedArt';
+
+/** Small wrapper so we can call the useCachedArt hook per artist row. */
+const CachedArtImg: React.FC<{ artPath: string; alt: string }> = ({ artPath, alt }) => {
+  const src = useCachedArt(artPath);
+  if (!src) return null;
+  return (
+    <Box
+      component="img"
+      src={src}
+      alt={alt}
+      sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+    />
+  );
+};
 
 const SettingsIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -146,12 +161,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onConnectClick, onSettingsClick, onNa
                 flexShrink: 0,
               }}>
                 {artUrl ? (
-                  <Box
-                    component="img"
-                    src={getMediaUrl(artUrl)}
-                    alt={artist}
-                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
+                  <CachedArtImg artPath={artUrl} alt={artist} />
                 ) : (
                   <Typography sx={{ fontSize: 14, color: 'text.secondary', fontWeight: 600 }}>
                     {artist.charAt(0).toUpperCase()}

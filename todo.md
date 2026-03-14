@@ -14,7 +14,6 @@
 1. [x] - Replace all hardcoded hex colors (`#1db954`, `#0a0a0a`, `#141414`, etc.) in components with theme tokens via MUI `ThemeProvider`
 1. [x] - Add a "Custom Theme" option with MUI color pickers for each token
 1. [x] - Persist the selected theme using the existing `saveableStore` pattern so it survives restarts
-1. [ ] - Sync the active theme across devices via WebSocket so mobile and desktop stay visually consistent
 
 ### Refactor Settings Page → Modal
 1. [x] - Remove fullscreen button

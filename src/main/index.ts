@@ -5,7 +5,7 @@ import { indexLibrary } from './indexer';
 import { getPlaybackState, onStateChange, removeDevice as removePlaybackDevice, broadcastState, registerDevice as registerPlaybackDevice } from './playback';
 import { isLocalAddress, validateDeviceToken, touchDevice, flushDeviceRegistry } from './auth';
 import { PORT, MUSIC_DIR, buildCsp } from './config';
-import { ServerWsMessage, WS_PROTOCOL_VERSION, MIN_WS_PROTOCOL_VERSION } from '../shared/types';
+import { ServerWsMessage, DeviceInfo, WS_PROTOCOL_VERSION, MIN_WS_PROTOCOL_VERSION } from '../shared/types';
 import {
   setFederationBroadcast,
   updateEdgeDeviceWs,
@@ -49,7 +49,7 @@ if (require('electron-squirrel-startup')) {
 
 // --- WebSocket liveness tracking (typed alternative to bolting isAlive onto ws) ---
 
-const wsLiveness = new Map<WebSocket, boolean>();
+const wsMissedPings = new Map<WebSocket, number>();
 
 // --- WebSocket device tracking ---
 
@@ -192,12 +192,13 @@ const createWindow = async (): Promise<void> => {
       let connectedDeviceId: string | null = null;
       let connectedDeviceName: string | null = null;
 
-      wsLiveness.set(ws, true);
-      ws.on('pong', () => { wsLiveness.set(ws, true); });
+      wsMissedPings.set(ws, 0);
+      ws.on('pong', () => { wsMissedPings.set(ws, 0); });
+
+      const url = new URL(req.url || '', `http://${req.headers.host}`);
 
       // Authenticate remote (edge) clients
       if (!isLocal) {
-        const url = new URL(req.url || '', `http://${req.headers.host}`);
         const token = url.searchParams.get('token');
         const device = validateDeviceToken(token || undefined);
         if (!device) {
@@ -226,6 +227,17 @@ const createWindow = async (): Promise<void> => {
 
         // Show sync banner immediately — edge device will scan and send its library
         broadcastToClients({ type: 'edge-sync-start', deviceName: device.name, songCount: 0 });
+      } else {
+        // Local (desktop) clients: register immediately via query params so the
+        // device appears in the device list before the welcome message is built.
+        // Previously this relied on an async HTTP POST that could race with the welcome.
+        const localDeviceId = url.searchParams.get('deviceId');
+        const localDeviceName = url.searchParams.get('deviceName') || 'Desktop';
+        const localDeviceType = (url.searchParams.get('deviceType') as DeviceInfo['type']) || 'desktop';
+        if (localDeviceId) {
+          registerPlaybackDevice(localDeviceId, localDeviceName, localDeviceType);
+          broadcastState();
+        }
       }
 
       // Handle incoming messages from edge devices (bidirectional protocol)
@@ -256,7 +268,7 @@ const createWindow = async (): Promise<void> => {
       });
 
       ws.on('close', (code) => {
-        wsLiveness.delete(ws);
+        wsMissedPings.delete(ws);
         if (connectedDeviceId) {
           deviceWebSockets.delete(connectedDeviceId);
           if (code !== 4001) {
@@ -286,16 +298,17 @@ const createWindow = async (): Promise<void> => {
       })();
     });
 
-    // Ping all clients every 3s for liveness detection
+    // Ping all clients every 3s terminate after 2 missed pongs (~20s)
     setInterval(() => {
       for (const client of wss!.clients) {
-        if (!wsLiveness.get(client)) {
-          console.log('[WS] Client failed ping, terminating');
-          wsLiveness.delete(client);
+        const missed = (wsMissedPings.get(client) ?? 0) + 1;
+        if (missed > 5) {
+          console.log(`[WS] Client missed ${missed - 1} pings, terminating`);
+          wsMissedPings.delete(client);
           client.terminate();
           continue;
         }
-        wsLiveness.set(client, false);
+        wsMissedPings.set(client, missed);
         client.ping();
       }
     }, 3000);

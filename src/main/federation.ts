@@ -12,7 +12,7 @@ import { Response } from 'express';
 import { Song, EdgeSongMeta, ServerWsMessage } from '../shared/types';
 import { mapHostSongRows, mapEdgeSongs, deduplicateSongs, mergeLibraries, EdgeLibraryEntry } from '../shared/federation';
 import { getAllSongs } from './database';
-import { handleSongSourceLost, getPlaybackState } from './playback';
+import { handleSongSourceLost, purgeDeviceFromQueue, getPlaybackState } from './playback';
 
 // --- Types ---
 
@@ -153,7 +153,10 @@ export async function unregisterEdgeDevice(deviceId: string): Promise<void> {
   pendingSyncDone.delete(device.deviceName);
   console.log(`[Federation] Unregistered edge device ${device.deviceName} (${deviceId})`);
 
-  // Check if the currently playing song was from this device
+  // Remove queued songs from this device
+  purgeDeviceFromQueue(deviceId);
+
+  // Handle the current song if it was sourced from this device
   const playbackState = getPlaybackState();
   if (playbackState.currentSong?.origin?.deviceId === deviceId) {
     const cached = hasAudioCache(deviceId,

@@ -162,6 +162,10 @@ let wasActivePlayer = false;
 // Whether this device has successfully registered with the server
 let registered = false;
 
+// Callback set by the initialization block to trigger immediate re-registration.
+// Defined at module level so applyServerState (also module level) can call it.
+let reregisterFn: (() => void) | null = null;
+
 // For non-active devices: track the server's position anchor so we can interpolate locally
 let serverPositionAnchor = 0;   // estimatedPosition at time of last server update
 let serverPositionTimestamp = 0; // Date.now() when we received that update
@@ -241,11 +245,11 @@ function applyServerState(
     serverIsPlaying = isNowPlaying;
   }
 
-  // If this device is missing from the server's device list, mark as
-  // unregistered so we re-register immediately. This makes the system
-  // self-healing regardless of why the device was pruned.
+  // If this device is missing from the server's device list, re-register
+  // immediately instead of waiting for the 10s polling interval.
   if (!server.devices.some(d => d.id === deviceId)) {
     registered = false;
+    if (reregisterFn) reregisterFn();
   }
 
   set({
@@ -592,6 +596,7 @@ if (typeof window !== 'undefined') {
     }
   }
 
+  reregisterFn = registerThisDevice;
   registerThisDevice();
 
   // --- WebSocket for instant state sync ---
@@ -609,7 +614,14 @@ if (typeof window !== 'undefined') {
   function connectWebSocket() {
     const base = getApiBase().replace(/^http/, 'ws');
     const token = getAuthToken();
-    const wsUrl = token ? `${base}?token=${encodeURIComponent(token)}` : base;
+    // Include device info in query params so the server can register this device
+    // synchronously in the WS handler, before the welcome message is built.
+    const params = new URLSearchParams();
+    if (token) params.set('token', token);
+    params.set('deviceId', deviceId);
+    params.set('deviceName', getDeviceName());
+    params.set('deviceType', getDeviceType());
+    const wsUrl = `${base}?${params.toString()}`;
     const ws = new WebSocket(wsUrl);
     activeWs = ws;
 
@@ -649,7 +661,12 @@ if (typeof window !== 'undefined') {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       heartbeatInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'heartbeat', deviceId }));
+          ws.send(JSON.stringify({
+            type: 'heartbeat',
+            deviceId,
+            name: getDeviceName(),
+            deviceType: getDeviceType(),
+          }));
         }
       }, 5000);
 
@@ -676,7 +693,7 @@ if (typeof window !== 'undefined') {
         const msg = JSON.parse(text) as ServerWsMessage;
 
         switch (msg.type) {
-          case 'welcome':
+          case 'welcome': {
             if (msg.protocolVersion !== WS_PROTOCOL_VERSION) {
               console.warn(
                 `[OpenTunes] Protocol version mismatch: server=${msg.protocolVersion}, client=${WS_PROTOCOL_VERSION}. Some features may not work.`
@@ -687,9 +704,23 @@ if (typeof window !== 'undefined') {
               usePlayerStore.setState.bind(usePlayerStore),
               usePlayerStore.getState
             );
-            useLibraryStore.setState({ songs: msg.library, loading: false });
+            if (isCapacitor()) {
+              // Merge: the welcome library won't include this device's edge songs yet
+              // (the host hasn't processed our edge-library message). Keep local songs
+              // that aren't already in the welcome library so they don't briefly vanish.
+              const currentSongs = useLibraryStore.getState().songs;
+              const welcomeHashes = new Set(msg.library.filter((s: Song) => s.hash).map((s: Song) => s.hash));
+              const welcomePaths = new Set(msg.library.map((s: Song) => s.path));
+              const localOnly = currentSongs.filter(
+                (s) => !welcomePaths.has(s.path) && (!s.hash || !welcomeHashes.has(s.hash))
+              );
+              useLibraryStore.setState({ songs: [...msg.library, ...localOnly], loading: false });
+            } else {
+              useLibraryStore.setState({ songs: msg.library, loading: false });
+            }
             registered = true;
             break;
+          }
           case 'state':
             applyServerState(
               msg.data,
@@ -748,7 +779,6 @@ if (typeof window !== 'undefined') {
         registered = false;
         revoked = true;
         clearConnection();
-        useLibraryStore.setState({ songs: [], loading: false });
         usePlayerStore.setState({
           currentTrack: null,
           isPlaying: false,
@@ -760,6 +790,13 @@ if (typeof window !== 'undefined') {
           duration: 0,
         });
         cleanupAllAudio();
+        // On Capacitor (edge) devices, fall back to local library instead of
+        // clearing it — the device's own music should remain accessible.
+        if (isCapacitor()) {
+          useLibraryStore.getState().switchToLocalLibrary();
+        } else {
+          useLibraryStore.setState({ songs: [], loading: false });
+        }
         return;
       }
 

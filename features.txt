@@ -1,0 +1,75 @@
+HopTunes - Feature Highlights
+==============================
+
+MUSIC LIBRARY MANAGEMENT
+- Browse your library by artist and album with beautiful album art and artist banners
+- Full-text search across songs, artists, and albums with real-time filtering
+- Support for multiple music folder locations
+- Manual library reindexing to pick up new files
+- Hide individual songs from your library via context menu
+
+PLAYBACK
+- Full transport controls: play, pause, skip forward/back
+- Seekable timeline with visual progress and time display
+- Gapless playback with seamless track transitions (dual audio element prebuffering)
+- Per-device volume control
+- Queue management: add, reorder (drag-and-drop), and remove upcoming tracks
+
+MULTI-DEVICE STREAMING
+- Pair devices instantly by scanning a QR code
+- Play music on any connected device and switch playback seamlessly between them
+- Real-time playback state sync across all devices via WebSockets
+- Active device indicator so you always know where music is playing
+- Device heartbeat tracking for online/offline status
+- Secure token-based authentication with rate-limited pairing
+
+LIBRARY FEDERATION
+- Share music libraries across multiple hosts/edge devices
+- Automatic deduplication of duplicate songs using content hashing
+- Unified browsable library merging host and edge device collections
+- Stream audio and album art directly from edge devices
+- Audio caching for offline playback of federated content
+- Visual sync banner showing scanning, hashing, and syncing progress
+
+CROSS-PLATFORM SUPPORT
+- Native desktop app (Windows, macOS, Linux) via Electron
+- Mobile app (iOS, Android) via Capacitor
+- Web browser access
+- Custom desktop title bar with minimize, maximize, close controls
+- Fullscreen mode for immersive listening
+- "Show in File Explorer" to locate songs on disk
+
+ANDROID AUTO & MOBILE
+- Full Android Auto integration: browse artists, albums, and tracks from the car display
+- Album art and transport controls mapped to Android Auto media buttons
+- Lock screen media controls and notification integration on Android
+- Expandable full-screen mobile player with large album art
+
+THEMES & CUSTOMIZATION
+- Dark, Light, and OLED (true black) display modes
+- 8 preset accent colors: Green, Blue, Purple, Red, Orange, Pink, Teal, Yellow
+- Custom accent color picker
+- Instant real-time theme preview
+- Persistent theme preferences across sessions
+
+USER INTERFACE
+- Material Design UI with professional, polished look
+- Virtualized lists for fast scrolling through large libraries
+- Right-click context menus for songs and albums
+- Smooth animations and transitions throughout
+- Responsive layout adapting to desktop, tablet, and mobile screens
+- Confetti celebration on successful device pairing
+
+SETTINGS & CONFIGURATION
+- Centralized settings modal with tabs: Devices, Library, Themes, About
+- View and manage all paired devices with type, pairing date, and last-seen info
+- Revoke individual devices or all devices at once
+- Add and remove music library folders
+- Mobile: scan device storage and pick specific folders for indexing
+
+UNDER THE HOOD
+- Automatic music metadata extraction (title, artist, album, duration, cover art)
+- SQLite database for persistent library and device storage
+- RESTful API backend with WebSocket real-time communication
+- Graceful fallback from server to local library on connection loss
+- External artist image fetching when embedded art is unavailable

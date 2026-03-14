@@ -12,6 +12,7 @@ import {
   getLanAddress,
 } from '../auth';
 import { removeDevice as removePlaybackDevice, broadcastState } from '../playback';
+import { unregisterEdgeDevice, getConnectedEdgeDevices } from '../federation';
 import { PORT } from '../config';
 
 export interface ConnectRouterDeps {
@@ -133,7 +134,7 @@ export function createConnectRouter(deps: ConnectRouterDeps): Router {
   });
 
   // DELETE /api/connect/devices/:id — revoke a single device (localhost only)
-  router.delete('/devices/:id', (req, res) => {
+  router.delete('/devices/:id', async (req, res) => {
     if (localhostOnly(req, res)) return;
     const targetId = req.params.id;
     const ok = revokeDevice(targetId);
@@ -143,16 +144,19 @@ export function createConnectRouter(deps: ConnectRouterDeps): Router {
     }
     removePlaybackDevice(targetId);
     deps.closeDeviceWebSocket(targetId);
+    await unregisterEdgeDevice(targetId);
     broadcastState();
     const devices = getRegisteredDevices().map(({ token, ...rest }) => rest);
     res.json(devices);
   });
 
   // POST /api/connect/revoke-all — revoke all devices (localhost only)
-  router.post('/revoke-all', (req, res) => {
+  router.post('/revoke-all', async (req, res) => {
     if (localhostOnly(req, res)) return;
+    const edgeDeviceIds = getConnectedEdgeDevices().map(d => d.deviceId);
     deps.closeAllDeviceWebSockets();
     revokeAllDevices();
+    await Promise.all(edgeDeviceIds.map(id => unregisterEdgeDevice(id)));
     broadcastState();
     res.json([]);
   });

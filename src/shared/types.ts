@@ -88,7 +88,7 @@ export type ServerWsMessage =
 
 export type ClientWsMessage =
   | { type: 'ping' }
-  | { type: 'heartbeat'; deviceId: string }
+  | { type: 'heartbeat'; deviceId: string; name?: string; deviceType?: DeviceType }
   // Federation: edge device announces its library
   | { type: 'edge-library'; deviceId: string; songs: EdgeSongMeta[]; syncing?: boolean }
   | { type: 'edge-library-update'; deviceId: string; updates: { localPath: string; hash: string }[] }

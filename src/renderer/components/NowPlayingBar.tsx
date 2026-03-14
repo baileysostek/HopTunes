@@ -4,6 +4,7 @@ import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore, DeviceInfo } from '../store/playerStore';
 import { getMediaUrl } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
+import { useCachedArt } from '../hooks/useCachedArt';
 import { isMobile } from '../utils/platform';
 
 function formatTime(seconds: number): string {
@@ -114,9 +115,8 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
   const playingElsewhere = !!activeDeviceId && activeDeviceId !== thisDeviceId;
   const mobile = isMobile();
 
-  const artSrc = currentTrack?.art
-    ? getMediaUrl(currentTrack.art)
-    : externalArt || null;
+  const cachedArt = useCachedArt(currentTrack?.art);
+  const artSrc = cachedArt ?? externalArt ?? null;
 
   // ── Mobile: compact bar + expandable full-screen player ──
   if (mobile) {
@@ -425,10 +425,10 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               mr: 1.5,
               flexShrink: 0,
             }}>
-              {currentTrack.art ? (
+              {cachedArt ? (
                 <Box
                   component="img"
-                  src={getMediaUrl(currentTrack.art!)}
+                  src={cachedArt}
                   alt={currentTrack.album}
                   sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />

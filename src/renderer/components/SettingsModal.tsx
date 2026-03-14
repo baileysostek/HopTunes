@@ -88,7 +88,7 @@ interface SettingsModalProps {
 
 // --- Tab Content Components ---
 
-const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice }) => {
+const DevicesTabDesktop: React.FC<{ onAddDevice: () => void; refreshKey: number }> = ({ onAddDevice, refreshKey }) => {
   const theme = useTheme();
   const [devices, setDevices] = useState<RegisteredDeviceInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,7 +108,7 @@ const DevicesTabDesktop: React.FC<{ onAddDevice: () => void }> = ({ onAddDevice 
     fetchDevices();
     const interval = setInterval(fetchDevices, 30000);
     return () => clearInterval(interval);
-  }, [fetchDevices]);
+  }, [fetchDevices, refreshKey]);
 
   const handleRevoke = async (deviceId: string) => {
     try {
@@ -987,6 +987,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
   const [closing, setClosing] = useState(false);
   const [visible, setVisible] = useState(false);
   const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [devicesRefreshKey, setDevicesRefreshKey] = useState(0);
 
   useEffect(() => {
     if (open) {
@@ -1113,7 +1114,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
               }}
             >
               <Box sx={{ width: '100%', height: '100%', flexShrink: 0, px: 3, py: 3, overflowY: 'auto', overflowX: 'hidden' }}>
-                {isElectron() ? <DevicesTabDesktop onAddDevice={() => setConnectModalOpen(true)} /> : <DevicesTabMobile />}
+                {isElectron() ? <DevicesTabDesktop onAddDevice={() => setConnectModalOpen(true)} refreshKey={devicesRefreshKey} /> : <DevicesTabMobile />}
               </Box>
               <Box sx={{ width: '100%', height: '100%', flexShrink: 0, px: 3, py: 3, overflowY: 'auto', overflowX: 'hidden' }}>
                 <LibraryTab />
@@ -1128,7 +1129,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
           </Box>
         </Box>
       </Box>
-      <ConnectModal open={connectModalOpen} onClose={() => setConnectModalOpen(false)} />
+      <ConnectModal open={connectModalOpen} onClose={() => { setConnectModalOpen(false); setDevicesRefreshKey(k => k + 1); }} />
     </>
   );
 };

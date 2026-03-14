@@ -25,6 +25,7 @@ const config: ForgeConfig = {
   plugins: [
     new AutoUnpackNativesPlugin({}),
     new WebpackPlugin({
+      port: 9001,
       mainConfig,
       renderer: {
         config: rendererConfig,

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Tooltip } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore } from '../store/playerStore';
 import { getMediaUrl, Song } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
+import { useCachedArt } from '../hooks/useCachedArt';
 import { isMobile } from '../utils/platform';
 
 function formatDuration(seconds: number | null): string {
@@ -87,8 +88,20 @@ const QueueItem: React.FC<QueueItemProps> = ({
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
         }}>
           {song.title}
+          {song.origin && (
+            <Tooltip title={song.origin.deviceName} arrow placement="top">
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', color: 'text.disabled', flexShrink: 0 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+                </svg>
+              </Box>
+            </Tooltip>
+          )}
         </Typography>
         <Typography sx={{
           fontSize: 11,
@@ -146,6 +159,7 @@ const QueuePanel: React.FC = () => {
     currentTrack && !currentTrack.art ? currentTrack.artist : '',
     currentTrack && !currentTrack.art ? currentTrack.album : '',
   );
+  const cachedArt = useCachedArt(currentTrack?.art);
 
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
@@ -225,8 +239,8 @@ const QueuePanel: React.FC = () => {
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', py: 0.75, px: 1, borderRadius: 1, bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
                 <Box sx={{ width: 36, height: 36, borderRadius: 0.5, overflow: 'hidden', bgcolor: 'background.paper', mr: 1.5, flexShrink: 0 }}>
-                  {currentTrack.art ? (
-                    <Box component="img" src={getMediaUrl(currentTrack.art!)} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  {cachedArt ? (
+                    <Box component="img" src={cachedArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : externalArt ? (
                     <Box component="img" src={externalArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : null}
@@ -348,10 +362,10 @@ const QueuePanel: React.FC = () => {
                 mr: 1.5,
                 flexShrink: 0,
               }}>
-                {currentTrack.art ? (
+                {cachedArt ? (
                   <Box
                     component="img"
-                    src={getMediaUrl(currentTrack.art!)}
+                    src={cachedArt}
                     sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 ) : externalArt ? (

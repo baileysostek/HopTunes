@@ -23,9 +23,13 @@ import androidx.core.app.NotificationCompat;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -412,37 +416,87 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
         updateNotification();
     }
 
-    // --- Album art loading ---
+    // --- Album art loading (with disk cache) ---
+
+    private File getArtCacheDir() {
+        File dir = new File(getCacheDir(), "album_art");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private String hashUrl(String url) {
+        try {
+            // Strip the auth token so the same art path always maps to the same cache key
+            String key = url.replaceAll("[?&]token=[^&]*", "");
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(key.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(url.hashCode());
+        }
+    }
 
     private void loadAlbumArt(final String artUrl) {
         new Thread(() -> {
-            try {
-                URL url = new URL(artUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setDoInput(true);
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-                conn.connect();
+            Bitmap bitmap = null;
+            String hash = hashUrl(artUrl);
+            File cached = new File(getArtCacheDir(), hash + ".png");
 
-                InputStream input = conn.getInputStream();
-                Bitmap bitmap = BitmapFactory.decodeStream(input);
-                input.close();
-
-                if (bitmap != null) {
-                    currentArt = bitmap;
-
-                    MediaMetadataCompat.Builder metaBuilder = new MediaMetadataCompat.Builder()
-                            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-                            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
-                            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
-                            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration)
-                            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bitmap);
-
-                    mediaSession.setMetadata(metaBuilder.build());
-                    updateNotification();
+            // 1. Try loading from disk cache
+            if (cached.exists()) {
+                try {
+                    FileInputStream fis = new FileInputStream(cached);
+                    bitmap = BitmapFactory.decodeStream(fis);
+                    fis.close();
+                } catch (Exception e) {
+                    // Cache read failed, will try network
                 }
-            } catch (Exception e) {
-                // Failed to load art - notification still works without it
+            }
+
+            // 2. If not cached, fetch from network and save
+            if (bitmap == null) {
+                try {
+                    URL url = new URL(artUrl);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setDoInput(true);
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    conn.connect();
+
+                    InputStream input = conn.getInputStream();
+                    bitmap = BitmapFactory.decodeStream(input);
+                    input.close();
+
+                    // Save to disk cache
+                    if (bitmap != null) {
+                        try {
+                            FileOutputStream fos = new FileOutputStream(cached);
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                            fos.close();
+                        } catch (Exception e) {
+                            // Cache write failed — non-critical
+                        }
+                    }
+                } catch (Exception e) {
+                    // Network fetch failed — bitmap stays null
+                }
+            }
+
+            // 3. Update media session with the bitmap (from cache or network)
+            if (bitmap != null) {
+                currentArt = bitmap;
+
+                MediaMetadataCompat.Builder metaBuilder = new MediaMetadataCompat.Builder()
+                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
+                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+                        .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
+                        .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration)
+                        .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bitmap);
+
+                mediaSession.setMetadata(metaBuilder.build());
+                updateNotification();
             }
         }).start();
     }

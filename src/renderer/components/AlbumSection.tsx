@@ -4,6 +4,7 @@ import TrackRow from './TrackRow';
 import { Song, getMediaUrl } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
 import { useAlbumImage } from '../hooks/useAlbumImage';
+import { useCachedArt } from '../hooks/useCachedArt';
 import { useAlbumContextMenuStore } from './AlbumContextMenu';
 import { isMobile } from '../utils/platform';
 
@@ -30,6 +31,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
   const play = usePlayerStore(s => s.play);
   const showAlbumMenu = useAlbumContextMenuStore(s => s.show);
   const externalArt = useAlbumImage(artUrl ? '' : artistName, artUrl ? '' : albumName);
+  const cachedArt = useCachedArt(artUrl);
   const mobile = isMobile();
 
   const sortedTracks = [...tracks].sort((a, b) => {
@@ -56,10 +58,10 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
       flexShrink: 0,
       alignSelf: 'flex-start',
     }}>
-      {artUrl ? (
+      {cachedArt ? (
         <Box
           component="img"
-          src={getMediaUrl(artUrl)}
+          src={cachedArt}
           alt={albumName}
           sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
