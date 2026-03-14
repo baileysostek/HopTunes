@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Typography, Slider } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore, DeviceInfo } from '../store/playerStore';
@@ -110,6 +110,38 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  const [departingDevices, setDepartingDevices] = useState<DeviceInfo[]>([]);
+  const prevDeviceSnapshot = useRef<Map<string, DeviceInfo>>(new Map());
+  const prevDeviceIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const currentIds = new Set(devices.map(d => d.id));
+    const prevIds = prevDeviceIds.current;
+
+    // Find devices that were previously visible but are now gone
+    if (prevIds.size > 0) {
+      const removed = [...prevIds].filter(id => !currentIds.has(id));
+      if (removed.length > 0) {
+        const newDeparting = removed
+          .map(id => prevDeviceSnapshot.current.get(id))
+          .filter((d): d is DeviceInfo => !!d);
+        if (newDeparting.length > 0) {
+          setDepartingDevices(prev => [...prev, ...newDeparting]);
+          const removedSet = new Set(removed);
+          setTimeout(() => {
+            setDepartingDevices(prev => prev.filter(d => !removedSet.has(d.id)));
+          }, 350);
+        }
+      }
+    }
+
+    // Keep a snapshot of all device info for lookup when they depart
+    prevDeviceIds.current = currentIds;
+    devices.forEach(d => prevDeviceSnapshot.current.set(d.id, d));
+  }, [devices]);
+
+  const displayDevices = [...devices, ...departingDevices];
+  const departingDeviceIds = new Set(departingDevices.map(d => d.id));
 
   const activeDevice = devices.find(d => d.id === activeDeviceId);
   const playingElsewhere = !!activeDeviceId && activeDeviceId !== thisDeviceId;
@@ -342,25 +374,37 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
             {/* Device menu overlay */}
             {deviceMenuOpen && (
+              <>
+              <Box
+                onClick={() => setDeviceMenuOpen(false)}
+                sx={{ position: 'fixed', inset: 0, zIndex: 9 }}
+              />
               <Box sx={{
                 position: 'absolute',
                 bottom: 80,
                 left: '50%',
-                transform: 'translateX(-50%)',
                 bgcolor: 'background.paper',
                 borderRadius: 2,
                 boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                 minWidth: 260,
                 py: 0.5,
                 zIndex: 10,
+                transformOrigin: 'bottom center',
+                '@keyframes deviceMenuGrow': {
+                  '0%': { opacity: 0, transform: 'translateX(-50%) scale(0.9)' },
+                  '100%': { opacity: 1, transform: 'translateX(-50%) scale(1)' },
+                },
+                animation: 'deviceMenuGrow 0.15s cubic-bezier(0.2, 0, 0, 1) forwards',
               }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600, color: 'text.primary', px: 2, py: 1.5 }}>
                   Select a device
                 </Typography>
-                {devices.map(device => (
+                {displayDevices.map(device => {
+                  const isDeparting = departingDeviceIds.has(device.id);
+                  return (
                   <Box
                     key={device.id}
-                    onClick={() => {
+                    onClick={isDeparting ? undefined : () => {
                       transferPlayback(device.id);
                       setDeviceMenuOpen(false);
                     }}
@@ -371,7 +415,15 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                       px: 2,
                       py: 1.5,
                       bgcolor: device.id === activeDeviceId ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
-                      '&:active': { bgcolor: 'action.selected' },
+                      '&:active': isDeparting ? {} : { bgcolor: 'action.selected' },
+                      ...(isDeparting && {
+                        '@keyframes deviceFadeOut': {
+                          '0%': { opacity: 1 },
+                          '100%': { opacity: 0 },
+                        },
+                        animation: 'deviceFadeOut 350ms ease-out forwards',
+                        pointerEvents: 'none' as const,
+                      }),
                     }}
                   >
                     <Box sx={{ color: device.id === activeDeviceId ? theme.palette.primary.main : 'text.secondary' }}>
@@ -386,13 +438,15 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                       {device.id === thisDeviceId ? ' (this device)' : ''}
                     </Typography>
                   </Box>
-                ))}
-                {devices.length === 0 && (
+                  );
+                })}
+                {displayDevices.length === 0 && (
                   <Typography sx={{ fontSize: 13, color: 'text.secondary', px: 2, py: 1.5 }}>
                     No devices connected
                   </Typography>
                 )}
               </Box>
+              </>
             )}
           </Box>
         )}
@@ -662,6 +716,11 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
           {/* Device dropdown */}
           {deviceMenuOpen && (
+            <>
+            <Box
+              onClick={() => setDeviceMenuOpen(false)}
+              sx={{ position: 'fixed', inset: 0, zIndex: 99 }}
+            />
             <Box sx={{
               position: 'absolute',
               bottom: '100%',
@@ -673,6 +732,12 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               minWidth: 220,
               py: 0.5,
               zIndex: 100,
+              transformOrigin: 'bottom right',
+              '@keyframes deviceMenuGrow': {
+                '0%': { opacity: 0, transform: 'scale(0.9)' },
+                '100%': { opacity: 1, transform: 'scale(1)' },
+              },
+              animation: 'deviceMenuGrow 0.15s cubic-bezier(0.2, 0, 0, 1) forwards',
             }}>
               <Typography sx={{
                 fontSize: 12,
@@ -683,10 +748,12 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               }}>
                 Select a device
               </Typography>
-              {devices.map(device => (
+              {displayDevices.map(device => {
+                const isDeparting = departingDeviceIds.has(device.id);
+                return (
                 <Box
                   key={device.id}
-                  onClick={() => {
+                  onClick={isDeparting ? undefined : () => {
                     transferPlayback(device.id);
                     setDeviceMenuOpen(false);
                   }}
@@ -696,9 +763,17 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                     gap: 1.5,
                     px: 2,
                     py: 1,
-                    cursor: 'pointer',
+                    cursor: isDeparting ? 'default' : 'pointer',
                     bgcolor: device.id === activeDeviceId ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
-                    '&:hover': { bgcolor: 'action.selected' },
+                    '&:hover': isDeparting ? {} : { bgcolor: 'action.selected' },
+                    ...(isDeparting && {
+                      '@keyframes deviceFadeOut': {
+                        '0%': { opacity: 1 },
+                        '100%': { opacity: 0 },
+                      },
+                      animation: 'deviceFadeOut 350ms ease-out forwards',
+                      pointerEvents: 'none' as const,
+                    }),
                   }}
                 >
                   <Box sx={{ color: device.id === activeDeviceId ? theme.palette.primary.main : 'text.secondary' }}>
@@ -715,8 +790,9 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                     </Typography>
                   </Box>
                 </Box>
-              ))}
-              {devices.length === 0 && (
+                );
+              })}
+              {displayDevices.length === 0 && (
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', px: 2, py: 1 }}>
                   No devices connected
                 </Typography>
@@ -751,6 +827,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                 </>
               )}
             </Box>
+            </>
           )}
         </Box>
       </Box>

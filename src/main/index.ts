@@ -55,6 +55,13 @@ const wsMissedPings = new Map<WebSocket, number>();
 
 const deviceWebSockets = new Map<string, WebSocket>();
 
+// --- Edge device grace period ---
+// When an edge device's WebSocket drops (e.g. phone screen off), delay
+// unregistration so the library stays available and playback isn't disrupted.
+// If the device reconnects within the window, the timer is cancelled.
+const EDGE_GRACE_PERIOD_MS = 60_000; // 60 seconds
+const edgeGracePeriodTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function closeDeviceWebSocket(deviceId: string): void {
   const ws = deviceWebSockets.get(deviceId);
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -130,6 +137,11 @@ const createWindow = async (): Promise<void> => {
   setupIpcHandlers(mainWindow);
   Menu.setApplicationMenu(null);
 
+  // Prevent Electron from navigating to files dropped onto the window
+  mainWindow.webContents.on('will-navigate', (event) => {
+    event.preventDefault();
+  });
+
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12') {
       mainWindow.webContents.toggleDevTools();
@@ -191,6 +203,7 @@ const createWindow = async (): Promise<void> => {
       console.log(`[WS] Client connected from ${addr} (local: ${isLocal}), total: ${wss!.clients.size}`);
       let connectedDeviceId: string | null = null;
       let connectedDeviceName: string | null = null;
+      let localClientDeviceId: string | null = null;
 
       wsMissedPings.set(ws, 0);
       ws.on('pong', () => { wsMissedPings.set(ws, 0); });
@@ -217,6 +230,14 @@ const createWindow = async (): Promise<void> => {
           return;
         }
 
+        // Cancel any pending grace-period unregistration from a prior disconnect
+        const gracePeriodTimer = edgeGracePeriodTimers.get(device.id);
+        if (gracePeriodTimer) {
+          clearTimeout(gracePeriodTimer);
+          edgeGracePeriodTimers.delete(device.id);
+          console.log(`[WS] Edge device ${device.name} reconnected within grace period`);
+        }
+
         touchDevice(device);
         connectedDeviceId = device.id;
         connectedDeviceName = device.name;
@@ -225,7 +246,7 @@ const createWindow = async (): Promise<void> => {
         updateEdgeDeviceWs(device.id, ws);
         broadcastState();
 
-        // Show sync banner immediately — edge device will scan and send its library
+        // Always show sync banner when an edge device connects.
         broadcastToClients({ type: 'edge-sync-start', deviceName: device.name, songCount: 0 });
       } else {
         // Local (desktop) clients: register immediately via query params so the
@@ -235,6 +256,7 @@ const createWindow = async (): Promise<void> => {
         const localDeviceName = url.searchParams.get('deviceName') || 'Desktop';
         const localDeviceType = (url.searchParams.get('deviceType') as DeviceInfo['type']) || 'desktop';
         if (localDeviceId) {
+          localClientDeviceId = localDeviceId;
           registerPlaybackDevice(localDeviceId, localDeviceName, localDeviceType);
           broadcastState();
         }
@@ -270,12 +292,52 @@ const createWindow = async (): Promise<void> => {
       ws.on('close', (code) => {
         wsMissedPings.delete(ws);
         if (connectedDeviceId) {
+          // Silently dismiss any active sync banner for this device.
+          // The renderer ignores this if no sync is in progress for this device.
+          if (connectedDeviceName) {
+            broadcastToClients({ type: 'edge-sync-cancel', deviceName: connectedDeviceName });
+          }
           deviceWebSockets.delete(connectedDeviceId);
-          if (code !== 4001) {
+          if (code === 4001) {
+            // Revocation — unregister immediately
             removePlaybackDevice(connectedDeviceId);
             unregisterEdgeDevice(connectedDeviceId);
             broadcastState();
+          } else {
+            // Non-revocation disconnect (e.g. phone screen off, network hiccup).
+            // Remove from the playback device list immediately so the "Select a
+            // device" popup updates in real time. Defer federation unregistration
+            // (edge library/songs) to give the device time to reconnect.
+            const deviceId = connectedDeviceId;
+            removePlaybackDevice(deviceId);
+
+            const existing = edgeGracePeriodTimers.get(deviceId);
+            if (existing) clearTimeout(existing);
+
+            console.log(`[WS] Edge device ${deviceId} disconnected, grace period ${EDGE_GRACE_PERIOD_MS / 1000}s`);
+            edgeGracePeriodTimers.set(deviceId, setTimeout(async () => {
+              edgeGracePeriodTimers.delete(deviceId);
+              console.log(`[WS] Grace period expired for ${deviceId}, unregistering`);
+              await unregisterEdgeDevice(deviceId);
+              broadcastState();
+              // unregisterEdgeDevice broadcasts library via debounce, but also
+              // send an immediate one to ensure clients see songs removed
+              const library = await getUnifiedLibraryNow();
+              broadcastToClients({ type: 'library', data: library });
+            }, EDGE_GRACE_PERIOD_MS));
+
+            // Broadcast state so the device list updates immediately, and
+            // re-broadcast the library so edge songs are removed right away
+            // (the grace period only preserves queue/playback, not browsing).
+            broadcastState();
+            getUnifiedLibraryNow().then(library => {
+              broadcastToClients({ type: 'library', data: library });
+            }).catch(() => {});
           }
+        } else if (localClientDeviceId) {
+          // Local client disconnected — remove from device list immediately
+          removePlaybackDevice(localClientDeviceId);
+          broadcastState();
         }
         console.log(`[WS] Client disconnected (code: ${code}), remaining: ${wss!.clients.size}`);
       });

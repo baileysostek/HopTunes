@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(MediaControlsPlugin.class);
         registerPlugin(LocalLibraryPlugin.class);
+        registerPlugin(NativeWebSocketPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Grant camera permission to the WebView when JavaScript requests it

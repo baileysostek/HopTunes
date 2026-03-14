@@ -11,6 +11,8 @@ import SongContextMenu from './SongContextMenu';
 import AlbumContextMenu from './AlbumContextMenu';
 import AlbumEditModal from './AlbumEditModal';
 import ReindexOverlay from './ReindexOverlay';
+import FolderDropOverlay from './FolderDropOverlay';
+import FolderImportOverlay from './FolderImportOverlay';
 import SyncBanner from './SyncBanner';
 import { isElectron, isMobile } from '../utils/platform';
 
@@ -85,7 +87,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <SearchBar />
           <SyncBanner />
-          <Box sx={{ flex: 1, overflow: 'auto', contain: 'strict', pr: 1 }}>
+          <Box sx={{ flex: 1, overflow: 'hidden', contain: 'strict', pr: 1 }}>
             {children}
           </Box>
         </Box>
@@ -104,6 +106,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         onClose={closeAlbumEdit}
       />
       <ReindexOverlay />
+      <FolderDropOverlay />
+      <FolderImportOverlay />
     </Box>
   );
 };

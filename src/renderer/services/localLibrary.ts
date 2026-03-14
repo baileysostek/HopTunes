@@ -1,12 +1,16 @@
 // Client-side local library orchestrator for edge (Capacitor) devices.
-// Scans local music via the LocalLibrary Capacitor plugin, syncs with the host,
-// and handles reverse streaming requests (host asking for audio/art from this device).
+// Scans local music via the LocalLibrary Capacitor plugin, syncs with the host
+// via the NativeWebSocket plugin, and persists to local SQLite for offline use.
+//
+// Reverse streaming (request-audio / request-art) is handled entirely in native
+// Java by NativeWebSocketManager — no JS involvement needed.
 
 import { registerPlugin } from '@capacitor/core';
-import { EdgeSongMeta, ClientWsMessage, ServerWsMessage } from '../../shared/types';
+import { EdgeSongMeta, ClientWsMessage } from '../../shared/types';
 import { isCapacitor } from '../utils/platform';
 import { edgeDatabase, initEdgeDatabase } from './edgeDatabase';
 import { useSyncStore } from '../components/SyncBanner';
+import { NativeWebSocket } from './nativeWebSocket';
 
 // --- Capacitor plugin interface ---
 
@@ -45,7 +49,6 @@ let initialized = false;
 let dbInitialized = false;
 let lastScanTime = 0;
 let localSongs: EdgeSongMeta[] = [];
-let sendWsMessage: ((msg: ClientWsMessage | ArrayBuffer) => void) | null = null;
 let deviceId: string = '';
 
 const MIN_RESCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
@@ -62,24 +65,16 @@ async function ensureDbInitialized(): Promise<void> {
  * Only runs on Capacitor (Android) — no-op on desktop/web.
  */
 export async function initLocalLibrary(
-  wsMessageSender: (msg: ClientWsMessage | ArrayBuffer) => void,
   edgeDeviceId: string,
 ): Promise<void> {
   if (!isCapacitor()) return;
 
-  // Always update the WS sender and device ID so reconnects use the new socket
-  sendWsMessage = wsMessageSender;
   deviceId = edgeDeviceId;
 
   if (initialized) {
-    // Already initialized — just re-announce our existing library to the new host connection
-    if (localSongs.length > 0 && sendWsMessage && deviceId) {
-      const msg: ClientWsMessage = {
-        type: 'edge-library',
-        deviceId,
-        songs: localSongs,
-      };
-      sendWsMessage(msg);
+    // Already initialized — re-announce via native WS on reconnect
+    if (localSongs.length > 0 && deviceId) {
+      announceToHost();
       console.log(`[LocalLibrary] Re-announced ${localSongs.length} songs on reconnect`);
     }
     return;
@@ -147,23 +142,6 @@ export async function removeMusicFolder(path: string): Promise<void> {
   if (!isCapacitor()) return;
   await ensureDbInitialized();
   await edgeDatabase.removeMediaLocation(path);
-}
-
-/**
- * Handle a server WebSocket message directed at the local library service.
- * Returns true if the message was handled, false otherwise.
- */
-export function handleLocalLibraryMessage(msg: ServerWsMessage): boolean {
-  switch (msg.type) {
-    case 'request-audio':
-      handleAudioRequest(msg.requestId, msg.localPath);
-      return true;
-    case 'request-art':
-      handleArtRequest(msg.requestId, msg.localPath);
-      return true;
-    default:
-      return false;
-  }
 }
 
 /**
@@ -248,17 +226,21 @@ async function scanAndAnnounce(): Promise<void> {
   }
 }
 
-/** Send the current localSongs to the host via WebSocket. */
+/** Send the current localSongs to the host via the native WebSocket. */
 function announceToHost(syncing = false): void {
-  if (sendWsMessage && deviceId && localSongs.length > 0) {
-    const msg: ClientWsMessage = {
-      type: 'edge-library',
-      deviceId,
-      songs: localSongs,
-      syncing,
-    };
-    sendWsMessage(msg);
-  }
+  if (!deviceId || localSongs.length === 0) return;
+
+  const msg: ClientWsMessage = {
+    type: 'edge-library',
+    deviceId,
+    songs: localSongs,
+    syncing,
+  };
+  const json = JSON.stringify(msg);
+
+  // Send via native WS and cache for reconnect re-announcement
+  NativeWebSocket.sendMessage({ message: json });
+  NativeWebSocket.cacheEdgeLibrary({ json });
 }
 
 const HASH_BATCH_SIZE = 50;
@@ -336,68 +318,4 @@ async function persistToLocalDb(songs: EdgeSongMeta[]): Promise<void> {
   }
 
   await edgeDatabase.markDuplicatesHidden();
-}
-
-// --- Reverse streaming handlers ---
-
-async function handleAudioRequest(requestId: string, localPath: string): Promise<void> {
-  if (!sendWsMessage) return;
-
-  try {
-    const result = await LocalLibrary.getFileBytes({ localPath });
-
-    // Send metadata first
-    const metaMsg: ClientWsMessage = {
-      type: 'edge-audio-response',
-      requestId,
-      mimeType: result.mimeType,
-      fileSize: result.fileSize,
-    };
-    sendWsMessage(metaMsg);
-
-    // Send binary chunks
-    for (const chunk of result.chunks) {
-      const bytes = base64ToArrayBuffer(chunk);
-      sendWsMessage(bytes);
-    }
-
-    // Send empty frame to signal completion
-    sendWsMessage(new ArrayBuffer(0));
-  } catch (err) {
-    console.error('[LocalLibrary] Failed to stream audio:', err);
-    // Send empty frame to signal error/completion
-    sendWsMessage(new ArrayBuffer(0));
-  }
-}
-
-async function handleArtRequest(requestId: string, localPath: string): Promise<void> {
-  if (!sendWsMessage) return;
-
-  try {
-    const result = await LocalLibrary.getEmbeddedArt({ localPath });
-    const msg: ClientWsMessage = {
-      type: 'edge-art-response',
-      requestId,
-      data: result.data,
-    };
-    sendWsMessage(msg);
-  } catch {
-    const msg: ClientWsMessage = {
-      type: 'edge-art-response',
-      requestId,
-      data: null,
-    };
-    sendWsMessage(msg);
-  }
-}
-
-// --- Utilities ---
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }

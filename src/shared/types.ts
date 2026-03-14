@@ -78,10 +78,14 @@ export type ServerWsMessage =
   | { type: 'welcome'; protocolVersion: number; state: ServerPlaybackState; library: Song[] }
   | { type: 'state'; data: ServerPlaybackState }
   | { type: 'library'; data: Song[] }
-  | { type: 'reindex-progress'; found: number }
+  | { type: 'reindex-progress'; found: number; added: number; skipped: number }
+  // Folder import: per-song progress when a folder is added
+  | { type: 'folder-import-song'; title: string; artist: string; album: string; isNew: boolean }
+  | { type: 'folder-import-done'; folderName: string; added: number; skipped: number }
   // Federation: host notifies clients about edge device sync status
   | { type: 'edge-sync-start'; deviceName: string; songCount: number }
   | { type: 'edge-sync-done'; deviceName: string; newSongCount: number }
+  | { type: 'edge-sync-cancel'; deviceName: string }
   // Federation: host asks edge device for audio/art
   | { type: 'request-audio'; requestId: string; localPath: string }
   | { type: 'request-art'; requestId: string; localPath: string };

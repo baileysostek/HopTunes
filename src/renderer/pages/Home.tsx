@@ -10,6 +10,35 @@ type ListItem =
   | { type: 'artist-banner'; artist: string; songCount: number; albumCount: number; totalDuration: number; bannerArt: string | null; departing?: boolean }
   | { type: 'album'; artist: string; albumName: string; tracks: Song[]; artUrl: string | null; allDeparting?: boolean; departingSongPaths?: Set<string> };
 
+// Virtuoso custom components — defined at module level to prevent remounting on every render
+const VirtuosoScroller = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ style, children, ...props }, ref) => (
+    <div ref={ref} style={{ ...style, overflowY: 'scroll' }} {...props}>
+      {children}
+    </div>
+  )
+);
+
+const VirtuosoList = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ style, children, ...props }, ref) => (
+    <div ref={ref} style={{ ...style, paddingLeft: 24, paddingRight: 24 }} {...props}>
+      {children}
+    </div>
+  )
+);
+
+const VirtuosoPadding = () => <div style={{ height: 24 }} />;
+
+const virtuosoComponents = {
+  Scroller: VirtuosoScroller,
+  List: VirtuosoList,
+  Header: VirtuosoPadding,
+  Footer: VirtuosoPadding,
+};
+
+const computeItemKey = (_index: number, item: ListItem) =>
+  item.type === 'artist-banner' ? `banner-${item.artist}` : `album-${item.artist}-${item.albumName}`;
+
 const ArtistBanner: React.FC<{ item: Extract<ListItem, { type: 'artist-banner' }> }> = ({ item }) => {
   const artistImage = useArtistImage(item.artist);
   const hasExternalArt = !!artistImage;
@@ -263,13 +292,14 @@ const Home = () => {
       style={{ height: '100%' }}
       data={items}
       overscan={400}
+      computeItemKey={computeItemKey}
       itemContent={renderItem}
-      components={{
-        List: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
-          <div ref={ref} style={{ ...style, padding: '24px' }} {...props}>
-            {children}
-          </div>
-        )),
+      components={virtuosoComponents}
+      totalListHeightChanged={(height) => {
+        console.log('[Virtuoso] totalListHeightChanged:', height);
+      }}
+      atBottomStateChange={(atBottom) => {
+        console.log('[Virtuoso] atBottomStateChange:', atBottom);
       }}
     />
   );

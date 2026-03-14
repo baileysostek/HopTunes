@@ -17,6 +17,7 @@ declare global {
       windowMaximize: () => void;
       windowClose: () => void;
       windowIsMaximized: () => Promise<boolean>;
+      getPathForFile: (file: File) => string;
     };
   }
 }

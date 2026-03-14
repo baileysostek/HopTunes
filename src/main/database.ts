@@ -127,6 +127,18 @@ export async function getAlbumSongs(artist: string, album: string): Promise<Song
   return all<SongRow>(GET_ALBUM_SONGS_SQL, [artist, album]);
 }
 
+/**
+ * Find a host song with embedded art for the given artist+album.
+ * Returns the file_path of the first matching song, or null.
+ */
+export async function findSongWithArtForAlbum(artist: string, album: string): Promise<string | null> {
+  const rows = await all<{ file_path: string }>(
+    'SELECT file_path FROM songs WHERE artist = ? AND album = ? AND has_art = 1 AND hidden = 0 LIMIT 1',
+    [artist, album]
+  );
+  return rows.length > 0 ? rows[0].file_path : null;
+}
+
 export async function getSongModifiedAt(filePath: string): Promise<number | null> {
   const rows = await all<{ file_modified_at: number }>(GET_SONG_MODIFIED_AT_SQL, [filePath]);
   return rows.length > 0 ? rows[0].file_modified_at : null;

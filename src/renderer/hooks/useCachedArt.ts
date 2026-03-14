@@ -10,7 +10,11 @@ import { isCapacitor } from '../utils/platform';
  * since the host is local.
  */
 export function useCachedArt(artPath: string | null | undefined): string | null {
-  const [src, setSrc] = useState<string | null>(null);
+  const [src, setSrc] = useState<string | null>(() => {
+    if (!artPath) return null;
+    if (!isCapacitor()) return getMediaUrl(artPath);
+    return null;
+  });
 
   useEffect(() => {
     if (!artPath) {

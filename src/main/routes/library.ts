@@ -2,11 +2,12 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { app } from 'electron';
 import { parseFile } from 'music-metadata';
 import { ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
 import { mapHostSongRows } from '../../shared/federation';
-import { getAllSongs, hideSongByPath, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation } from '../database';
-import { indexLibrary } from '../indexer';
+import { getAllSongs, hideSongByPath, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation, findSongWithArtForAlbum } from '../database';
+import { indexLibrary, indexSingleFolder } from '../indexer';
 import { MUSIC_DIR } from '../config';
 import { isLocalAddress } from '../auth';
 import {
@@ -15,7 +16,48 @@ import {
   requestArtFromEdge,
   getAudioCachePath,
   isEdgeDeviceOnline,
+  getConnectedEdgeDevices,
+  findEdgeSongWithArtForAlbum,
 } from '../federation';
+
+// --- Persistent art cache on disk ---
+const ART_CACHE_DIR = path.join(app.getPath('userData'), 'art-cache');
+fs.mkdirSync(ART_CACHE_DIR, { recursive: true });
+
+/** Get the cache path for a given art source key (file path or device+path). */
+function getArtCachePath(key: string): string {
+  const safeName = Buffer.from(key).toString('base64url');
+  return path.join(ART_CACHE_DIR, safeName);
+}
+
+/** Try to serve art from the disk cache. Returns true if served. */
+function serveArtFromCache(key: string, res: Response): boolean {
+  const cachePath = getArtCachePath(key);
+  if (!fs.existsSync(cachePath)) return false;
+  try {
+    const data = fs.readFileSync(cachePath);
+    // Detect image type from magic bytes
+    const isJpeg = data[0] === 0xFF && data[1] === 0xD8;
+    const isPng = data[0] === 0x89 && data[1] === 0x50;
+    const contentType = isPng ? 'image/png' : isJpeg ? 'image/jpeg' : 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Write art data to the disk cache (fire-and-forget). */
+function cacheArtToDisk(key: string, data: Buffer | Uint8Array): void {
+  try {
+    const cachePath = getArtCachePath(key);
+    fs.writeFileSync(cachePath, data);
+  } catch {
+    // Caching is best-effort
+  }
+}
 
 export interface LibraryRouterDeps {
   broadcastToClients: (message: ServerWsMessage) => void;
@@ -113,8 +155,8 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   router.post('/reindex', async (_req: Request, res: Response) => {
     try {
       const dirs = await getIndexDirs();
-      await indexLibrary(dirs, (found) => {
-        deps.broadcastToClients({ type: 'reindex-progress', found });
+      await indexLibrary(dirs, ({ found, added, skipped }) => {
+        deps.broadcastToClients({ type: 'reindex-progress', found, added, skipped });
       });
       const library = await getUnifiedLibrary();
       deps.broadcastToClients({ type: 'library', data: library });
@@ -148,15 +190,28 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
     try {
-      await addMediaLocation(locationPath);
-      const dirs = await getIndexDirs();
-      // Reindex in background so the response is fast
-      indexLibrary(dirs, (found) => {
-        deps.broadcastToClients({ type: 'reindex-progress', found });
-      }).then(async () => {
+      const resolvedDrop = path.resolve(locationPath);
+      const existingLocations = await getMediaLocations();
+
+      // Check if this path is already within an existing library location
+      const isSubdirectory = existingLocations.some(loc => {
+        const resolvedLoc = path.resolve(loc);
+        return resolvedDrop.startsWith(resolvedLoc + path.sep) || resolvedDrop === resolvedLoc;
+      });
+
+      if (!isSubdirectory) {
+        await addMediaLocation(locationPath);
+      }
+
+      const folderName = path.basename(locationPath);
+      // Index the folder in background with per-song progress
+      indexSingleFolder(locationPath, (song) => {
+        deps.broadcastToClients({ type: 'folder-import-song', ...song });
+      }).then(async ({ added, skipped }) => {
+        deps.broadcastToClients({ type: 'folder-import-done', folderName, added, skipped });
         const library = await getUnifiedLibrary();
         deps.broadcastToClients({ type: 'library', data: library });
-      }).catch(err => console.error('Reindex after add failed:', err));
+      }).catch(err => console.error('Folder import failed:', err));
       const locations = await getMediaLocations();
       res.json(locations);
     } catch (err) {
@@ -213,7 +268,8 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
   });
 
-  // GET /api/album-art — proxy album art lookup with caching
+  // GET /api/album-art — album art lookup
+  // Resolution order: SQLite cache → host library → edge devices → TheAudioDB (last resort)
   router.get('/album-art', async (req: Request, res: Response) => {
     const artist = req.query.artist as string | undefined;
     const album = req.query.album as string | undefined;
@@ -222,11 +278,32 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
     try {
+      // 1. Check SQLite cache (includes previous TheAudioDB results)
       const cached = await getCachedAlbumArt(artist, album);
       if (cached !== undefined) {
         res.json({ thumb: cached });
         return;
       }
+
+      // 2. Search host library for a song with embedded art for this album
+      const hostSongPath = await findSongWithArtForAlbum(artist, album);
+      if (hostSongPath) {
+        const thumb = `/api/art/${encodeURIComponent(hostSongPath)}`;
+        await cacheAlbumArt(artist, album, thumb);
+        res.json({ thumb });
+        return;
+      }
+
+      // 3. Search connected edge devices for art
+      const edgeMatch = findEdgeSongWithArtForAlbum(artist, album);
+      if (edgeMatch) {
+        const thumb = `/api/art/remote/${edgeMatch.deviceId}/${encodeURIComponent(edgeMatch.localPath)}`;
+        await cacheAlbumArt(artist, album, thumb);
+        res.json({ thumb });
+        return;
+      }
+
+      // 4. Last resort: TheAudioDB
       const url = `https://www.theaudiodb.com/api/v1/json/2/searchalbum.php?s=${encodeURIComponent(artist)}&a=${encodeURIComponent(album)}`;
       const response = await fetch(url);
       const data = await response.json();
@@ -344,17 +421,24 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   });
 
   // GET /api/art/remote/:deviceId/:file — get album art from an edge device
+  // Art is cached to disk so disconnected devices' art is still available.
   router.get('/art/remote/:deviceId/:file', async (req: Request, res: Response) => {
     const { deviceId, file } = req.params;
     const localPath = decodeURIComponent(file);
+
+    // Check disk cache first
+    const cacheKey = `edge:${deviceId}:${localPath}`;
+    if (serveArtFromCache(cacheKey, res)) return;
 
     try {
       const base64Data = await requestArtFromEdge(deviceId, localPath);
       if (base64Data) {
         const buffer = Buffer.from(base64Data, 'base64');
-        // Try to detect image type from base64 header
-        const isJpeg = base64Data.startsWith('/9j/');
-        const isPng = base64Data.startsWith('iVBOR');
+        // Cache to disk for future requests
+        cacheArtToDisk(cacheKey, buffer);
+        // Detect image type from magic bytes
+        const isJpeg = buffer[0] === 0xFF && buffer[1] === 0xD8;
+        const isPng = buffer[0] === 0x89 && buffer[1] === 0x50;
         const contentType = isPng ? 'image/png' : isJpeg ? 'image/jpeg' : 'image/jpeg';
         res.setHeader('Content-Type', contentType);
         res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -368,6 +452,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   });
 
   // GET /api/art/:file — extract embedded album art (with path traversal protection)
+  // Art is cached to disk on first extraction so subsequent requests skip parsing.
   router.get('/art/:file', async (req: Request, res: Response) => {
     const filePath = decodeURIComponent(req.params.file);
 
@@ -376,11 +461,18 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
 
+    // Check disk cache first
+    const cacheKey = `host:${filePath}`;
+    if (serveArtFromCache(cacheKey, res)) return;
+
     try {
       const metadata = await parseFile(filePath);
       const picture = metadata.common.picture?.[0];
       if (picture) {
+        // Cache to disk for future requests
+        cacheArtToDisk(cacheKey, picture.data);
         res.setHeader('Content-Type', picture.format);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
         res.send(picture.data);
       } else {
         res.status(404).send('No artwork');

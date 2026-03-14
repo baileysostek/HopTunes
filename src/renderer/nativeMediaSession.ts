@@ -102,28 +102,16 @@ function pushQueue() {
 export function initNativeMediaSession() {
   if (!isCapacitor()) return;
 
-  // Listen for native media button presses (lock screen, notification, Android Auto)
+  // Listen for native media button presses.
+  // Basic transport controls (play/pause/next/prev/seek) are now handled
+  // natively in OpenTunesMediaService via HTTP API calls — this avoids
+  // double-firing when JS is awake and ensures controls work when WebView
+  // is suspended (screen off). Only Android Auto browsing actions still
+  // need JS context.
   MediaControls.addListener('mediaControlAction', (data) => {
     const store = usePlayerStore.getState();
 
     switch (data.action) {
-      case 'play':
-        store.resume();
-        break;
-      case 'pause':
-        store.pause();
-        break;
-      case 'next':
-        store.next();
-        break;
-      case 'previous':
-        store.prev();
-        break;
-      case 'seekTo':
-        if (data.seekPosition != null) {
-          store.seek(data.seekPosition);
-        }
-        break;
       case 'playFromMediaId': {
         // Android Auto tapped a song in the browse tree. mediaId is the song path.
         const mediaId = data.mediaId;

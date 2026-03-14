@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, TextField, IconButton } from '@mui/material';
 import { useLibraryStore } from '../store/libraryStore';
+import { usePlayerStore } from '../store/playerStore';
 import { isMobile } from '../utils/platform';
 
 interface SearchBarProps {
@@ -12,6 +13,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onMenuClick }) => {
   const [localQuery, setLocalQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mobile = isMobile();
+  const queueVisible = usePlayerStore(s => s.queueVisible);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -26,7 +28,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onMenuClick }) => {
   return (
     <Box sx={{
       pl: mobile ? 1 : 3,
-      pr: mobile ? 1 : 0,
+      pr: mobile ? 1 : queueVisible ? 1.5 : 0,
       py: 1.5,
       borderBottom: '1px solid',
       borderBottomColor: 'divider',
@@ -35,6 +37,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onMenuClick }) => {
       alignItems: 'center',
       WebkitAppRegion: mobile ? undefined : 'drag',
       flexShrink: 0,
+      transition: 'padding-right 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
     }}>
       {mobile && onMenuClick && (
         <IconButton onClick={onMenuClick} sx={{ color: 'text.secondary', mr: 0.5 }} size="small">
@@ -74,9 +77,16 @@ const SearchBar: React.FC<SearchBarProps> = ({ onMenuClick }) => {
           },
         }}
       />
-      {/* Spacer for window controls — no-drag so buttons remain clickable (desktop only) */}
+      {/* Spacer for window controls — no-drag so buttons remain clickable (desktop only, collapses when queue panel covers them) */}
       {!mobile && (
-        <Box sx={{ width: 150, minWidth: 150, alignSelf: 'stretch', WebkitAppRegion: 'no-drag' }} />
+        <Box sx={{
+          width: queueVisible ? 0 : 150,
+          minWidth: queueVisible ? 0 : 150,
+          alignSelf: 'stretch',
+          WebkitAppRegion: 'no-drag',
+          transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          overflow: 'hidden',
+        }} />
       )}
     </Box>
   );

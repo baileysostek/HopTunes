@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
 import TrackRow from './TrackRow';
 import { Song, getMediaUrl } from '../types/song';
@@ -33,6 +33,20 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
   const externalArt = useAlbumImage(artUrl ? '' : artistName, artUrl ? '' : albumName);
   const cachedArt = useCachedArt(artUrl);
   const mobile = isMobile();
+
+  // DEBUG: track height changes via ResizeObserver
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        console.log(`[AlbumSection] "${albumName}" height:`, entry.contentRect.height, 'width:', entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [albumName]);
 
   const sortedTracks = [...tracks].sort((a, b) => {
     if (a.trackNumber !== b.trackNumber) return a.trackNumber - b.trackNumber;
@@ -85,7 +99,10 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
   const albumHeader = (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary', fontSize: mobile ? 18 : 24 }}>
+        <Typography variant="subtitle1" sx={{
+          fontWeight: 600, color: 'text.primary', fontSize: mobile ? 18 : 24,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+        }}>
           {albumName}
         </Typography>
         <Box
@@ -148,7 +165,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
 
   if (mobile) {
     return (
-      <Box onContextMenu={handleContextMenu} sx={{ ...containerSx, flexDirection: 'column' }}>
+      <Box ref={containerRef} onContextMenu={handleContextMenu} sx={{ ...containerSx, flexDirection: 'column' }}>
         {/* Art + album info row */}
         <Box sx={{ display: 'flex' }}>
           {albumArt}
@@ -165,7 +182,7 @@ const AlbumSection: React.FC<AlbumSectionProps> = ({ albumName, tracks, artUrl, 
   }
 
   return (
-    <Box onContextMenu={handleContextMenu} sx={containerSx}>
+    <Box ref={containerRef} onContextMenu={handleContextMenu} sx={containerSx}>
       {albumArt}
       <Box sx={{ flex: 1, py: 1.5, px: 2, minWidth: 0 }}>
         {albumHeader}

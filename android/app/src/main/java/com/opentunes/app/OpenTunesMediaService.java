@@ -7,15 +7,22 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaDescriptionCompat;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -29,6 +36,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import android.net.wifi.WifiManager;
+
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -37,6 +46,7 @@ import java.util.Map;
 
 public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
+    private static final String TAG = "OpenTunesMedia";
     private static final String CHANNEL_ID = "opentunes_media";
     private static final int NOTIFICATION_ID = 1;
 
@@ -55,6 +65,7 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
     public static final String ACTION_PREV = "com.opentunes.app.ACTION_PREV";
 
     private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
     private MediaSessionCompat mediaSession;
 
     // Current metadata for notification rebuilds
@@ -70,13 +81,29 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
     private List<Bundle> library = new ArrayList<>();
     private List<Bundle> queue = new ArrayList<>();
 
-    // Static callback for media button events -> JS
+    // Static callback for media button events -> JS (Android Auto browsing only)
     public interface MediaActionCallback {
         void onAction(String action);
     }
 
     private static MediaActionCallback actionCallback;
     private static OpenTunesMediaService instance;
+
+    // Native WebSocket manager — survives WebView suspension
+    private NativeWebSocketManager webSocketManager;
+
+    // Native audio playback (replaces HTMLAudioElement when WebView is suspended)
+    private MediaPlayer nativePlayer;
+    private String currentNativeSource; // URL or local path currently loaded
+    private boolean pendingPlay;        // start playback when onPrepared fires
+    private long pendingSeekMs;         // seek to this position when prepared
+    private boolean nativePlayerPrepared = false;
+    private Handler mainHandler;
+
+    // Audio focus
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
+    private boolean hasAudioFocus = false;
 
     public static void setMediaActionCallback(MediaActionCallback callback) {
         actionCallback = callback;
@@ -86,14 +113,21 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
         return instance;
     }
 
+    public NativeWebSocketManager getWebSocketManager() {
+        return webSocketManager;
+    }
+
     // --- Lifecycle ---
 
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
+        mainHandler = new Handler(Looper.getMainLooper());
+        webSocketManager = new NativeWebSocketManager();
         createNotificationChannel();
         createMediaSession();
+        setupAudioFocus();
         acquireWakeLock();
     }
 
@@ -110,6 +144,11 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
     @Override
     public void onDestroy() {
         instance = null;
+        if (webSocketManager != null) {
+            webSocketManager.shutdown();
+        }
+        releaseNativePlayer();
+        abandonAudioFocus();
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
@@ -273,24 +312,225 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
         }
     }
 
+    // --- Native playback control (called from NativeWebSocketManager) ---
+
+    /**
+     * Called when a state/welcome message arrives via the native WebSocket.
+     * Updates the lock screen/notification and controls native MediaPlayer.
+     * Runs on the main thread via Handler.
+     */
+    public void handleNativePlayback(final String audioUrl, final String localPath,
+                                      final String title, final String artist,
+                                      final String album, final String artUrl,
+                                      final long durationMs, final boolean isPlaying,
+                                      final long positionMs, final boolean isActiveDevice) {
+        mainHandler.post(() -> doHandleNativePlayback(
+                audioUrl, localPath, title, artist, album, artUrl,
+                durationMs, isPlaying, positionMs, isActiveDevice));
+    }
+
+    private void doHandleNativePlayback(String audioUrl, String localPath,
+                                         String title, String artist, String album,
+                                         String artUrl, long durationMs,
+                                         boolean isPlaying, long positionMs,
+                                         boolean isActiveDevice) {
+        // Always update lock screen metadata and notification
+        if (title != null) {
+            updateMetadata(title, artist, album, artUrl, durationMs);
+        }
+        updatePlaybackState(isPlaying, positionMs);
+
+        if (!isActiveDevice) {
+            // Not the active player — stop native audio if playing
+            stopNativeAudio();
+            return;
+        }
+
+        // This device is the active player — manage native MediaPlayer
+        String source = localPath != null ? localPath : audioUrl;
+        if (source == null) {
+            // No track to play
+            stopNativeAudio();
+            return;
+        }
+
+        initNativePlayer();
+
+        if (!source.equals(currentNativeSource)) {
+            // Track changed — load new source
+            Log.d(TAG, "Loading new track: " + (localPath != null ? "local" : "remote"));
+            nativePlayer.reset();
+            nativePlayerPrepared = false;
+            currentNativeSource = source;
+            pendingPlay = isPlaying;
+            pendingSeekMs = positionMs;
+
+            try {
+                nativePlayer.setAudioAttributes(new AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build());
+
+                if (localPath != null) {
+                    nativePlayer.setDataSource(localPath);
+                } else {
+                    nativePlayer.setDataSource(audioUrl);
+                }
+                nativePlayer.prepareAsync();
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to set data source: " + source, e);
+                currentNativeSource = null;
+                nativePlayerPrepared = false;
+            }
+        } else if (nativePlayerPrepared) {
+            // Same track — just update play state and position
+            try {
+                if (isPlaying && !nativePlayer.isPlaying()) {
+                    if (requestAudioFocus()) {
+                        nativePlayer.start();
+                    }
+                } else if (!isPlaying && nativePlayer.isPlaying()) {
+                    nativePlayer.pause();
+                }
+
+                // Sync position if significantly off (> 2 seconds)
+                int currentPos = nativePlayer.getCurrentPosition();
+                if (Math.abs(currentPos - positionMs) > 2000) {
+                    nativePlayer.seekTo((int) positionMs);
+                }
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "MediaPlayer in bad state, resetting", e);
+                currentNativeSource = null;
+                nativePlayerPrepared = false;
+            }
+        }
+        // If preparing (nativePlayerPrepared == false && source matches),
+        // just wait — onPrepared will handle it with pendingPlay/pendingSeekMs
+    }
+
+    private void initNativePlayer() {
+        if (nativePlayer != null) return;
+
+        nativePlayer = new MediaPlayer();
+        nativePlayer.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
+
+        nativePlayer.setOnPreparedListener(mp -> {
+            nativePlayerPrepared = true;
+            Log.d(TAG, "MediaPlayer prepared");
+
+            if (pendingSeekMs > 0) {
+                mp.seekTo((int) pendingSeekMs);
+                pendingSeekMs = 0;
+            }
+            if (pendingPlay) {
+                if (requestAudioFocus()) {
+                    mp.start();
+                    Log.d(TAG, "MediaPlayer started playback");
+                }
+            }
+        });
+
+        nativePlayer.setOnCompletionListener(mp -> {
+            Log.d(TAG, "Track completed, notifying server to advance");
+            currentNativeSource = null;
+            nativePlayerPrepared = false;
+            // Tell the server to advance to the next track
+            if (webSocketManager != null) {
+                webSocketManager.postSkip();
+            }
+        });
+
+        nativePlayer.setOnErrorListener((mp, what, extra) -> {
+            Log.e(TAG, "MediaPlayer error: what=" + what + " extra=" + extra);
+            currentNativeSource = null;
+            nativePlayerPrepared = false;
+            return true; // error handled
+        });
+    }
+
+    private void stopNativeAudio() {
+        if (nativePlayer != null) {
+            try {
+                if (nativePlayer.isPlaying()) {
+                    nativePlayer.pause();
+                }
+            } catch (IllegalStateException ignored) {}
+        }
+    }
+
+    private void releaseNativePlayer() {
+        if (nativePlayer != null) {
+            try {
+                nativePlayer.release();
+            } catch (Exception ignored) {}
+            nativePlayer = null;
+            currentNativeSource = null;
+            nativePlayerPrepared = false;
+        }
+    }
+
+    // --- Native media button handling ---
+
+    /** Resume playback: start native player + tell server. */
+    private void nativeResume() {
+        if (nativePlayer != null && nativePlayerPrepared && !nativePlayer.isPlaying()) {
+            if (requestAudioFocus()) {
+                try { nativePlayer.start(); } catch (Exception ignored) {}
+            }
+        }
+        currentIsPlaying = true;
+        updatePlaybackState(true, getCurrentPositionMs());
+        if (webSocketManager != null) webSocketManager.postResume();
+    }
+
+    /** Pause playback: pause native player + tell server. */
+    private void nativePause() {
+        if (nativePlayer != null && nativePlayerPrepared) {
+            try {
+                if (nativePlayer.isPlaying()) {
+                    currentPosition = nativePlayer.getCurrentPosition();
+                    nativePlayer.pause();
+                }
+            } catch (Exception ignored) {}
+        }
+        currentIsPlaying = false;
+        updatePlaybackState(false, getCurrentPositionMs());
+        if (webSocketManager != null) webSocketManager.postPause();
+    }
+
+    /** Seek native player + tell server. */
+    private void nativeSeek(long posMs) {
+        if (nativePlayer != null && nativePlayerPrepared) {
+            try { nativePlayer.seekTo((int) posMs); } catch (Exception ignored) {}
+        }
+        currentPosition = posMs;
+        updatePlaybackState(currentIsPlaying, posMs);
+        if (webSocketManager != null) webSocketManager.postSeek(posMs / 1000.0);
+    }
+
+    private long getCurrentPositionMs() {
+        if (nativePlayer != null && nativePlayerPrepared) {
+            try { return nativePlayer.getCurrentPosition(); } catch (Exception ignored) {}
+        }
+        return currentPosition;
+    }
+
     // --- Notification action handling ---
 
     private void handleAction(String action) {
-        if (actionCallback != null) {
-            switch (action) {
-                case ACTION_PLAY:
-                    actionCallback.onAction("play");
-                    break;
-                case ACTION_PAUSE:
-                    actionCallback.onAction("pause");
-                    break;
-                case ACTION_NEXT:
-                    actionCallback.onAction("next");
-                    break;
-                case ACTION_PREV:
-                    actionCallback.onAction("previous");
-                    break;
-            }
+        switch (action) {
+            case ACTION_PLAY:
+                nativeResume();
+                break;
+            case ACTION_PAUSE:
+                nativePause();
+                break;
+            case ACTION_NEXT:
+                if (webSocketManager != null) webSocketManager.postSkip();
+                break;
+            case ACTION_PREV:
+                if (webSocketManager != null) webSocketManager.postSkipPrev();
+                break;
         }
     }
 
@@ -320,31 +560,32 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
-                if (actionCallback != null) actionCallback.onAction("play");
+                nativeResume();
             }
 
             @Override
             public void onPause() {
-                if (actionCallback != null) actionCallback.onAction("pause");
+                nativePause();
             }
 
             @Override
             public void onSkipToNext() {
-                if (actionCallback != null) actionCallback.onAction("next");
+                if (webSocketManager != null) webSocketManager.postSkip();
             }
 
             @Override
             public void onSkipToPrevious() {
-                if (actionCallback != null) actionCallback.onAction("previous");
+                if (webSocketManager != null) webSocketManager.postSkipPrev();
             }
 
             @Override
             public void onSeekTo(long pos) {
-                if (actionCallback != null) actionCallback.onAction("seekTo:" + pos);
+                nativeSeek(pos);
             }
 
             @Override
             public void onPlayFromMediaId(String mediaId, Bundle extras) {
+                // Android Auto browsing — requires JS context
                 if (actionCallback != null) {
                     actionCallback.onAction("playFromMediaId:" + mediaId);
                 }
@@ -352,6 +593,7 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
             @Override
             public void onSkipToQueueItem(long id) {
+                // Android Auto queue — requires JS context
                 if (actionCallback != null) {
                     actionCallback.onAction("skipToQueueItem:" + id);
                 }
@@ -361,6 +603,71 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
         // Connect the session to this browser service so Android Auto can find it
         setSessionToken(mediaSession.getSessionToken());
+    }
+
+    // --- Audio focus ---
+
+    private void setupAudioFocus() {
+        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+
+        AudioAttributes attrs = new AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .build();
+
+        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .setOnAudioFocusChangeListener(this::onAudioFocusChange)
+                .build();
+    }
+
+    private boolean requestAudioFocus() {
+        if (hasAudioFocus) return true;
+        if (audioManager == null) return false;
+        int result = audioManager.requestAudioFocus(audioFocusRequest);
+        hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+        return hasAudioFocus;
+    }
+
+    private void abandonAudioFocus() {
+        if (hasAudioFocus && audioManager != null) {
+            audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            hasAudioFocus = false;
+        }
+    }
+
+    private void onAudioFocusChange(int focusChange) {
+        switch (focusChange) {
+            case AudioManager.AUDIOFOCUS_LOSS:
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                // Another app took audio focus — pause native player
+                if (nativePlayer != null && nativePlayerPrepared) {
+                    try {
+                        if (nativePlayer.isPlaying()) {
+                            nativePlayer.pause();
+                        }
+                    } catch (Exception ignored) {}
+                }
+                hasAudioFocus = false;
+                break;
+            case AudioManager.AUDIOFOCUS_GAIN:
+                // Regained focus — resume if server state says playing
+                hasAudioFocus = true;
+                if (nativePlayer != null && nativePlayerPrepared
+                        && currentIsPlaying && !nativePlayer.isPlaying()) {
+                    try { nativePlayer.start(); } catch (Exception ignored) {}
+                }
+                if (nativePlayer != null) {
+                    try { nativePlayer.setVolume(1.0f, 1.0f); } catch (Exception ignored) {}
+                }
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                // Lower volume temporarily
+                if (nativePlayer != null) {
+                    try { nativePlayer.setVolume(0.3f, 0.3f); } catch (Exception ignored) {}
+                }
+                break;
+        }
     }
 
     // --- Public methods called from MediaControlsPlugin ---
@@ -576,12 +883,28 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
             );
             wakeLock.acquire();
         }
+
+        // Keep the WiFi radio fully active so WebSocket connections survive
+        // when the screen turns off. Without this, Android drops WiFi to a
+        // low-power mode that kills TCP connections.
+        WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+        if (wifiManager != null) {
+            wifiLock = wifiManager.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                    "OpenTunes::MediaServiceWifiLock"
+            );
+            wifiLock.acquire();
+        }
     }
 
     private void releaseWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
             wakeLock = null;
+        }
+        if (wifiLock != null && wifiLock.isHeld()) {
+            wifiLock.release();
+            wifiLock = null;
         }
     }
 }

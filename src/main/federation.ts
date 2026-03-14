@@ -72,7 +72,12 @@ export async function registerEdgeLibrary(
   songs: EdgeSongMeta[],
   syncing?: boolean,
 ): Promise<void> {
-  const isNew = !edgeDevices.has(deviceId);
+  const existing = edgeDevices.get(deviceId);
+  // Detect re-announcements (e.g., native WS reconnect sending cached library).
+  // If the device is already registered with the same number of songs, this is
+  // likely a reconnect re-announcement — skip the sync banners to avoid noise.
+  const isReannounce = !!existing && existing.songs.length === songs.length;
+
   edgeDevices.set(deviceId, {
     deviceId,
     deviceName,
@@ -82,8 +87,8 @@ export async function registerEdgeLibrary(
   });
   console.log(`[Federation] Registered edge device ${deviceName} (${deviceId}) with ${songs.length} songs`);
 
-  // Notify all clients about sync status
-  if (broadcastFn && songs.length > 0) {
+  // Notify all clients about sync status (skip for re-announcements)
+  if (broadcastFn && songs.length > 0 && !isReannounce) {
     broadcastFn({ type: 'edge-sync-start', deviceName, songCount: songs.length });
 
     if (!syncing) {
@@ -174,23 +179,32 @@ export async function unregisterEdgeDevice(deviceId: string): Promise<void> {
 
 /** Get the unified library: host songs + all edge device songs, deduplicated. */
 export async function getUnifiedLibrary(): Promise<Song[]> {
-  const hostRows = await getAllSongs();
+  // Include hidden songs so they participate in deduplication — a hidden host
+  // song must block its edge duplicate from appearing.  After merging (where
+  // host songs come first and win in dedup), we strip the hidden entries.
+  const hostRows = await getAllSongs(true);
   const hostSongs = mapHostSongRows(hostRows);
 
   const edgeLibraries = new Map<string, EdgeLibraryEntry>();
   const onlineDevices = new Set<string>();
 
   for (const [deviceId, device] of edgeDevices) {
+    // Only include songs from devices with a live WebSocket. Devices in the
+    // grace period (WS dropped but not yet unregistered) keep their
+    // registration so the queue and current track are preserved, but their
+    // songs should not appear in the browsable library — they're unplayable.
+    if (device.ws.readyState !== WebSocket.OPEN) continue;
+
     edgeLibraries.set(deviceId, {
       deviceId: device.deviceId,
       deviceName: device.deviceName,
       songs: device.songs,
     });
-    // All registered devices are considered online (they have active WS)
     onlineDevices.add(deviceId);
   }
 
-  return mergeLibraries(hostSongs, edgeLibraries, onlineDevices);
+  const merged = mergeLibraries(hostSongs, edgeLibraries, onlineDevices);
+  return merged.filter(song => !song.hidden);
 }
 
 /** Check if an edge device is currently registered and connected. */
@@ -206,6 +220,26 @@ export function getConnectedEdgeDevices(): { deviceId: string; deviceName: strin
     deviceName: d.deviceName,
     songCount: d.songs.length,
   }));
+}
+
+/**
+ * Search all connected edge devices for a song with art matching the given artist+album.
+ * Returns { deviceId, localPath } of the first match, or null.
+ */
+export function findEdgeSongWithArtForAlbum(
+  artist: string,
+  album: string,
+): { deviceId: string; localPath: string } | null {
+  for (const [deviceId, device] of edgeDevices) {
+    if (device.ws.readyState !== WebSocket.OPEN) continue;
+    const match = device.songs.find(
+      s => s.hasArt && s.artist === artist && s.album === album,
+    );
+    if (match) {
+      return { deviceId, localPath: match.localPath };
+    }
+  }
+  return null;
 }
 
 // --- Reverse Audio Streaming (stream-as-it-arrives) ---

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Box, Typography, Tooltip } from '@mui/material';
+import { Box, Typography, Tooltip, IconButton } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore } from '../store/playerStore';
 import { getMediaUrl, Song } from '../types/song';
@@ -13,6 +13,12 @@ function formatDuration(seconds: number | null): string {
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
+
+const CollapseIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>
+  </svg>
+);
 
 const DragHandleIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -316,18 +322,16 @@ const QueuePanel: React.FC = () => {
         <Typography sx={{ fontSize: 16, fontWeight: 700, color: 'text.primary' }}>
           Queue
         </Typography>
-        <Box
+        <IconButton
           onClick={toggleQueue}
+          size="small"
           sx={{
-            cursor: 'pointer',
             color: 'text.secondary',
-            '&:hover': { color: 'text.primary' },
-            display: 'flex',
-            alignItems: 'center',
+            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
           }}
         >
-          <RemoveIcon />
-        </Box>
+          <CollapseIcon />
+        </IconButton>
       </Box>
 
       <Box sx={{ flex: 1, overflow: 'auto', px: 1 }}>
