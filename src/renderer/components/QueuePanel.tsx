@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Box, Typography, Tooltip, IconButton } from '@mui/material';
+import { Box, Typography, Tooltip } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
+import { Virtuoso } from 'react-virtuoso';
 import { usePlayerStore } from '../store/playerStore';
 import { getMediaUrl, Song } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
@@ -13,12 +14,6 @@ function formatDuration(seconds: number | null): string {
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
-
-const CollapseIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>
-  </svg>
-);
 
 const DragHandleIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -159,6 +154,7 @@ const QueuePanel: React.FC = () => {
   const toggleQueue = usePlayerStore(s => s.toggleQueue);
   const moveInQueue = usePlayerStore(s => s.moveInQueue);
   const removeFromQueue = usePlayerStore(s => s.removeFromQueue);
+  const shuffleEnabled = usePlayerStore(s => s.shuffleEnabled);
   const play = usePlayerStore(s => s.play);
 
   const externalArt = useAlbumImage(
@@ -169,35 +165,150 @@ const QueuePanel: React.FC = () => {
 
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
+  const dropTargetRef = useRef<number | null>(null);
 
   const handleDragStart = useCallback((index: number) => {
+    dragIndexRef.current = index;
     setDragIndex(index);
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
     e.preventDefault();
+    dropTargetRef.current = index;
     setDropTarget(index);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    if (dragIndex !== null && dropTarget !== null && dragIndex !== dropTarget) {
-      moveInQueue(dragIndex, dropTarget);
-    }
-    setDragIndex(null);
-    setDropTarget(null);
-  }, [dragIndex, dropTarget, moveInQueue]);
+  }, []);
 
   const handleDragEnd = useCallback(() => {
+    const from = dragIndexRef.current;
+    const to = dropTargetRef.current;
+    if (from !== null && to !== null && from !== to) {
+      moveInQueue(from, to);
+    }
+    dragIndexRef.current = null;
+    dropTargetRef.current = null;
     setDragIndex(null);
     setDropTarget(null);
-  }, []);
+  }, [moveInQueue]);
 
   const handlePlay = useCallback((song: Song) => {
     play(song);
   }, [play]);
 
   const mobile = isMobile();
+
+  const nowPlayingSection = currentTrack ? (
+    <Box sx={{ py: 1.5, px: 1 }}>
+      <Typography sx={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: 'text.secondary',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        px: 1,
+        mb: 0.5,
+      }}>
+        Now Playing
+      </Typography>
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        py: 0.75,
+        px: 1,
+        borderRadius: 1,
+        bgcolor: alpha(theme.palette.primary.main, 0.1),
+      }}>
+        <Box sx={{
+          width: 36,
+          height: 36,
+          borderRadius: 0.5,
+          overflow: 'hidden',
+          bgcolor: 'background.paper',
+          mr: 1.5,
+          flexShrink: 0,
+        }}>
+          {cachedArt ? (
+            <Box component="img" src={cachedArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : externalArt ? (
+            <Box component="img" src={externalArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : null}
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: theme.palette.primary.main,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            {currentTrack.title}
+          </Typography>
+          <Typography sx={{
+            fontSize: 11,
+            color: 'text.secondary',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            {currentTrack.artist}
+          </Typography>
+        </Box>
+      </Box>
+    </Box>
+  ) : null;
+
+  const upNextHeader = (
+    <Typography sx={{
+      fontSize: 11,
+      fontWeight: 700,
+      color: 'text.secondary',
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      px: 1,
+      mb: 0.5,
+      pt: 1,
+    }}>
+      Up Next {queue.length > 0 ? `(${queue.length})` : ''}{mobile && shuffleEnabled ? ' · Shuffled' : ''}
+    </Typography>
+  );
+
+  const upNextContent = queue.length === 0 ? (
+    <Box sx={{ px: 1 }}>
+      {upNextHeader}
+      <Typography sx={{ fontSize: 13, color: 'text.disabled', px: 1, py: 2, textAlign: 'center' }}>
+        Queue is empty
+      </Typography>
+    </Box>
+  ) : (
+    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', px: 1 }}>
+      {upNextHeader}
+      <Virtuoso
+        style={{ flex: 1 }}
+        totalCount={queue.length}
+        overscan={200}
+        itemContent={(idx) => (
+          <QueueItem
+            key={`${queue[idx].path}-${idx}`}
+            song={queue[idx]}
+            index={idx}
+            dragIndex={dragIndex}
+            dropTarget={dropTarget}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            onRemove={removeFromQueue}
+            onPlay={handlePlay}
+          />
+        )}
+      />
+    </Box>
+  );
 
   // On mobile, render as a full-screen overlay
   if (mobile) {
@@ -237,59 +348,8 @@ const QueuePanel: React.FC = () => {
           </Box>
         </Box>
 
-        <Box sx={{ flex: 1, overflow: 'auto', px: 1 }}>
-          {currentTrack && (
-            <Box sx={{ py: 1.5 }}>
-              <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1, px: 1, mb: 0.5 }}>
-                Now Playing
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', py: 0.75, px: 1, borderRadius: 1, bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
-                <Box sx={{ width: 36, height: 36, borderRadius: 0.5, overflow: 'hidden', bgcolor: 'background.paper', mr: 1.5, flexShrink: 0 }}>
-                  {cachedArt ? (
-                    <Box component="img" src={cachedArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : externalArt ? (
-                    <Box component="img" src={externalArt} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : null}
-                </Box>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography sx={{ fontSize: 14, fontWeight: 500, color: theme.palette.primary.main, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {currentTrack.title}
-                  </Typography>
-                  <Typography sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {currentTrack.artist}
-                  </Typography>
-                </Box>
-              </Box>
-            </Box>
-          )}
-
-          <Box sx={{ py: 1 }}>
-            <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1, px: 1, mb: 0.5 }}>
-              Up Next {queue.length > 0 ? `(${queue.length})` : ''}
-            </Typography>
-            {queue.length === 0 ? (
-              <Typography sx={{ fontSize: 13, color: 'text.disabled', px: 1, py: 2, textAlign: 'center' }}>
-                Queue is empty
-              </Typography>
-            ) : (
-              queue.map((song, idx) => (
-                <QueueItem
-                  key={`${song.path}-${idx}`}
-                  song={song}
-                  index={idx}
-                  dragIndex={dragIndex}
-                  dropTarget={dropTarget}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  onDragEnd={handleDragEnd}
-                  onRemove={removeFromQueue}
-                  onPlay={handlePlay}
-                />
-              ))
-            )}
-          </Box>
-        </Box>
+        {nowPlayingSection}
+        {upNextContent}
       </Box>
     );
   }
@@ -297,6 +357,7 @@ const QueuePanel: React.FC = () => {
   // Desktop: inline side panel
   return (
     <Box sx={{
+      position: 'relative',
       width: queueVisible ? 320 : 0,
       minWidth: queueVisible ? 320 : 0,
       bgcolor: 'background.paper',
@@ -308,140 +369,13 @@ const QueuePanel: React.FC = () => {
       transition: 'width 0.25s ease, min-width 0.25s ease',
       willChange: 'width, min-width',
     }}>
-      {/* Header — pt accounts for the floating window controls */}
-      <Box sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        px: 2,
-        pt: '38px',
-        pb: 1.5,
-        borderBottom: '1px solid',
-        borderBottomColor: 'divider',
-      }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 700, color: 'text.primary' }}>
-          Queue
-        </Typography>
-        <IconButton
-          onClick={toggleQueue}
-          size="small"
-          sx={{
-            color: 'text.secondary',
-            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
-          }}
-        >
-          <CollapseIcon />
-        </IconButton>
+      {/* Now Playing — fixed at top */}
+      <Box sx={{ flexShrink: 0, pt: '8px' }}>
+        {nowPlayingSection}
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'auto', px: 1 }}>
-        {/* Now Playing */}
-        {currentTrack && (
-          <Box sx={{ py: 1.5 }}>
-            <Typography sx={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'text.secondary',
-              textTransform: 'uppercase',
-              letterSpacing: 1,
-              px: 1,
-              mb: 0.5,
-            }}>
-              Now Playing
-            </Typography>
-            <Box sx={{
-              display: 'flex',
-              alignItems: 'center',
-              py: 0.75,
-              px: 1,
-              borderRadius: 1,
-              bgcolor: alpha(theme.palette.primary.main, 0.1),
-            }}>
-              <Box sx={{
-                width: 36,
-                height: 36,
-                borderRadius: 0.5,
-                overflow: 'hidden',
-                bgcolor: 'background.paper',
-                mr: 1.5,
-                flexShrink: 0,
-              }}>
-                {cachedArt ? (
-                  <Box
-                    component="img"
-                    src={cachedArt}
-                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : externalArt ? (
-                  <Box
-                    component="img"
-                    src={externalArt}
-                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : null}
-              </Box>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: theme.palette.primary.main,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}>
-                  {currentTrack.title}
-                </Typography>
-                <Typography sx={{
-                  fontSize: 11,
-                  color: 'text.secondary',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}>
-                  {currentTrack.artist}
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        )}
-
-        {/* Up Next */}
-        <Box sx={{ py: 1 }}>
-          <Typography sx={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'text.secondary',
-            textTransform: 'uppercase',
-            letterSpacing: 1,
-            px: 1,
-            mb: 0.5,
-          }}>
-            Up Next {queue.length > 0 ? `(${queue.length})` : ''}
-          </Typography>
-
-          {queue.length === 0 ? (
-            <Typography sx={{ fontSize: 13, color: 'text.disabled', px: 1, py: 2, textAlign: 'center' }}>
-              Queue is empty
-            </Typography>
-          ) : (
-            queue.map((song, idx) => (
-              <QueueItem
-                key={`${song.path}-${idx}`}
-                song={song}
-                index={idx}
-                dragIndex={dragIndex}
-                dropTarget={dropTarget}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
-                onRemove={removeFromQueue}
-                onPlay={handlePlay}
-              />
-            ))
-          )}
-        </Box>
-      </Box>
+      {/* Up Next — scrollable via Virtuoso */}
+      {upNextContent}
     </Box>
   );
 };

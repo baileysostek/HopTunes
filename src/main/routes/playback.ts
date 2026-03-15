@@ -18,6 +18,7 @@ import {
   registerDevice,
   heartbeatDevice,
   setActiveDevice,
+  setShuffle,
   broadcastState,
 } from '../playback';
 
@@ -129,6 +130,18 @@ router.post('/skip', (req, res) => {
 // POST /api/playback/skip-prev — go back to previous song from history
 router.post('/skip-prev', (req, res) => {
   skipPrev();
+  respondAndBroadcast(res);
+});
+
+// PUT /api/playback/shuffle — toggle shuffle on/off
+//   body: { enabled: boolean }
+router.put('/shuffle', (req, res) => {
+  const { enabled } = req.body as { enabled: boolean };
+  if (typeof enabled !== 'boolean') {
+    res.status(400).json({ error: 'enabled (boolean) is required' });
+    return;
+  }
+  setShuffle(enabled);
   respondAndBroadcast(res);
 });
 

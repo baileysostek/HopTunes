@@ -9,6 +9,7 @@ import { isCapacitor } from './utils/platform';
 import { usePlayerStore } from './store/playerStore';
 import { useLibraryStore } from './store/libraryStore';
 import { getMediaUrl } from './types/song';
+import { searchSongs, buildSearchQueue } from '../shared/search';
 import type { Song } from '../shared/types';
 
 interface MediaControlsPlugin {
@@ -36,6 +37,11 @@ interface MediaControlsPlugin {
       seekPosition?: number;
       mediaId?: string;
       queueIndex?: number;
+      query?: string;
+      artist?: string;
+      album?: string;
+      title?: string;
+      focus?: string;
     }) => void,
   ): Promise<{ remove: () => Promise<void> }>;
 }
@@ -80,18 +86,26 @@ function pushFullState() {
   }).catch(() => {});
 }
 
+/** Resolve relative art paths to absolute URLs so native code can fetch them. */
+function resolveSongArt(songs: Song[]): Song[] {
+  return songs.map((s) => ({
+    ...s,
+    art: s.art ? getMediaUrl(s.art) : null,
+  }));
+}
+
 /** Push the full library to the native side for Android Auto browsing */
 function pushLibrary() {
   const { songs } = useLibraryStore.getState();
   if (songs.length > 0) {
-    MediaControls.updateLibrary({ songs }).catch(() => {});
+    MediaControls.updateLibrary({ songs: resolveSongArt(songs) }).catch(() => {});
   }
 }
 
 /** Push the current queue to the native side for Android Auto */
 function pushQueue() {
   const { queue } = usePlayerStore.getState();
-  MediaControls.updateQueue({ queue }).catch(() => {});
+  MediaControls.updateQueue({ queue: resolveSongArt(queue) }).catch(() => {});
 }
 
 /**
@@ -133,6 +147,23 @@ export function initNativeMediaSession() {
         const queue = store.queue;
         if (idx >= 0 && idx < queue.length) {
           store.play(queue[idx]);
+        }
+        break;
+      }
+      case 'playFromSearch': {
+        // Voice search from Google Assistant / Android Auto
+        const query = data.query || '';
+        const songs = useLibraryStore.getState().songs;
+        const results = searchSongs(songs, query, {
+          artist: data.artist,
+          album: data.album,
+          title: data.title,
+          focus: data.focus,
+        });
+        if (results.length > 0) {
+          const match = results[0];
+          const queueSongs = buildSearchQueue(songs, match, data.focus);
+          store.play(match, queueSongs.length > 1 ? queueSongs : undefined);
         }
         break;
       }

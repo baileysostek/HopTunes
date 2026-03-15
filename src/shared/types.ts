@@ -64,6 +64,7 @@ export interface PlaybackState {
   updatedAt: number;      // Date.now() when position was last set
   queue: Song[];
   history: Song[];
+  shuffleEnabled: boolean;
 }
 
 export interface ServerPlaybackState extends PlaybackState {

@@ -42,6 +42,17 @@ public class MediaControlsPlugin extends Plugin {
                 } catch (NumberFormatException e) {
                     return;
                 }
+            } else if (action.startsWith("playFromSearch:")) {
+                data.put("action", "playFromSearch");
+                String payload = action.substring(15);
+                String[] parts = payload.split("\\|");
+                data.put("query", parts[0]);
+                for (int i = 1; i < parts.length; i++) {
+                    String[] kv = parts[i].split(":", 2);
+                    if (kv.length == 2 && !kv[1].isEmpty()) {
+                        data.put(kv[0], kv[1]);
+                    }
+                }
             } else {
                 data.put("action", action);
             }

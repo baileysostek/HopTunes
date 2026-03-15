@@ -42,16 +42,22 @@ const FolderDropOverlay: React.FC = () => {
     }
   }, []);
 
+  const hasExternalFiles = useCallback((e: DragEvent) => {
+    return e.dataTransfer?.types?.includes('Files') ?? false;
+  }, []);
+
   const handleDragEnter = useCallback((e: DragEvent) => {
+    if (!hasExternalFiles(e)) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current += 1;
     if (dragCounter.current === 1) {
       setVisible(true);
     }
-  }, []);
+  }, [hasExternalFiles]);
 
   const handleDragLeave = useCallback((e: DragEvent) => {
+    if (!hasExternalFiles(e)) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current -= 1;
@@ -59,15 +65,16 @@ const FolderDropOverlay: React.FC = () => {
       dragCounter.current = 0;
       setVisible(false);
     }
-  }, []);
+  }, [hasExternalFiles]);
 
   const handleDragOver = useCallback((e: DragEvent) => {
+    if (!hasExternalFiles(e)) return;
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'copy';
     }
-  }, []);
+  }, [hasExternalFiles]);
 
   useEffect(() => {
     if (!isElectron()) return;

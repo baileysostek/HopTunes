@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useCallback } from 'react';
 import { Box, Typography, CircularProgress } from '@mui/material';
 import { Virtuoso } from 'react-virtuoso';
 import { useLibraryStore } from '../store/libraryStore';
+import { usePlayerStore } from '../store/playerStore';
 import AlbumSection from '../components/AlbumSection';
 import { Song, getMediaUrl } from '../types/song';
 import { useArtistImage } from '../hooks/useArtistImage';
 
 type ListItem =
-  | { type: 'artist-banner'; artist: string; songCount: number; albumCount: number; totalDuration: number; bannerArt: string | null; departing?: boolean }
+  | { type: 'artist-banner'; artist: string; songCount: number; albumCount: number; totalDuration: number; bannerArt: string | null; tracks: Song[]; departing?: boolean }
   | { type: 'album'; artist: string; albumName: string; tracks: Song[]; artUrl: string | null; allDeparting?: boolean; departingSongPaths?: Set<string> };
 
 // Virtuoso custom components — defined at module level to prevent remounting on every render
@@ -42,6 +43,8 @@ const computeItemKey = (_index: number, item: ListItem) =>
 const ArtistBanner: React.FC<{ item: Extract<ListItem, { type: 'artist-banner' }> }> = ({ item }) => {
   const artistImage = useArtistImage(item.artist);
   const hasExternalArt = !!artistImage;
+  const play = usePlayerStore(s => s.play);
+  const shuffleEnabled = usePlayerStore(s => s.shuffleEnabled);
 
   return (
     <Box sx={{
@@ -113,27 +116,58 @@ const ArtistBanner: React.FC<{ item: Extract<ListItem, { type: 'artist-banner' }
         pointerEvents: 'none',
       }} />
 
-      {/* Text content */}
-      <Box sx={{ position: 'relative', p: 4, width: '100%' }}>
-        <Typography sx={{
-          fontSize: 48,
-          fontWeight: 800,
-          color: 'text.primary',
-          textShadow: '0 2px 16px rgba(0,0,0,0.7)',
-          lineHeight: 1.1,
-        }}>
-          {item.artist}
-        </Typography>
-        <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 1 }}>
-          {item.songCount} songs
-          {' \u00B7 '}
-          {item.albumCount} album{item.albumCount !== 1 ? 's' : ''}
-          {item.totalDuration > 0 && ` \u00B7 ${
-            Math.floor(item.totalDuration / 3600) > 0
-              ? `${Math.floor(item.totalDuration / 3600)}:${Math.floor((item.totalDuration % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(item.totalDuration % 60).toString().padStart(2, '0')}`
-              : `${Math.floor(item.totalDuration / 60)}:${Math.floor(item.totalDuration % 60).toString().padStart(2, '0')}`
-          }`}
-        </Typography>
+      {/* Text content + play button */}
+      <Box sx={{ position: 'relative', p: 4, width: '100%', display: 'flex', alignItems: 'flex-end', gap: 3 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{
+            fontSize: 48,
+            fontWeight: 800,
+            color: 'text.primary',
+            textShadow: '0 2px 16px rgba(0,0,0,0.7)',
+            lineHeight: 1.1,
+          }}>
+            {item.artist}
+          </Typography>
+          <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 1 }}>
+            {item.songCount} songs
+            {' \u00B7 '}
+            {item.albumCount} album{item.albumCount !== 1 ? 's' : ''}
+            {item.totalDuration > 0 && ` \u00B7 ${
+              Math.floor(item.totalDuration / 3600) > 0
+                ? `${Math.floor(item.totalDuration / 3600)}:${Math.floor((item.totalDuration % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(item.totalDuration % 60).toString().padStart(2, '0')}`
+                : `${Math.floor(item.totalDuration / 60)}:${Math.floor(item.totalDuration % 60).toString().padStart(2, '0')}`
+            }`}
+          </Typography>
+        </Box>
+        {item.tracks.length > 0 && (
+          <Box
+            onClick={() => {
+              const start = shuffleEnabled
+                ? item.tracks[Math.floor(Math.random() * item.tracks.length)]
+                : item.tracks[0];
+              play(start, item.tracks);
+            }}
+            sx={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              bgcolor: 'primary.main',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              opacity: 0.9,
+              flexShrink: 0,
+              transition: 'opacity 0.15s, transform 0.1s',
+              '&:hover': { opacity: 1, transform: 'scale(1.08)' },
+              boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="white">
+              <polygon points="3,1 13,8 3,15" />
+            </svg>
+          </Box>
+        )}
       </Box>
     </Box>
   );
@@ -206,6 +240,7 @@ const Home = () => {
         albumCount: albums.size,
         totalDuration: allTracks.reduce((sum, tracks) => sum + tracks.reduce((s, t) => s + (t.duration || 0), 0), 0),
         bannerArt,
+        tracks: allTracks.flat(),
         departing: artistDeparting,
       });
 
@@ -295,12 +330,6 @@ const Home = () => {
       computeItemKey={computeItemKey}
       itemContent={renderItem}
       components={virtuosoComponents}
-      totalListHeightChanged={(height) => {
-        console.log('[Virtuoso] totalListHeightChanged:', height);
-      }}
-      atBottomStateChange={(atBottom) => {
-        console.log('[Virtuoso] atBottomStateChange:', atBottom);
-      }}
     />
   );
 };

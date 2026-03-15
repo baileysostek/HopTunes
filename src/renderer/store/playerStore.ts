@@ -127,6 +127,7 @@ interface PlayerState {
   queue: Song[];
   hasHistory: boolean;
   queueVisible: boolean;
+  shuffleEnabled: boolean;
   activeDeviceId: string | null;
   devices: DeviceInfo[];
   thisDeviceId: string;
@@ -143,6 +144,7 @@ interface PlayerState {
   moveInQueue: (from: number, to: number) => void;
   removeFromQueue: (index: number) => void;
   toggleQueue: () => void;
+  toggleShuffle: () => void;
   transferPlayback: (deviceId: string) => Promise<void>;
 }
 
@@ -259,6 +261,7 @@ function applyServerState(
     isPlaying: isNowPlaying,
     queue: server.queue,
     hasHistory: server.history.length > 0,
+    shuffleEnabled: server.shuffleEnabled,
     activeDeviceId: server.activeDeviceId,
     devices: server.devices,
     // Set position/duration from server when this device isn't driving audio,
@@ -279,6 +282,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   queue: [],
   hasHistory: false,
   queueVisible: false,
+  shuffleEnabled: false,
   activeDeviceId: null,
   devices: [],
   thisDeviceId: deviceId,
@@ -500,6 +504,30 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   toggleQueue: () => set({ queueVisible: !get().queueVisible }),
+
+  toggleShuffle: async () => {
+    if (isLocalOnlyMode()) {
+      const current = get().shuffleEnabled;
+      set({ shuffleEnabled: !current });
+      // Local-only: shuffle/unshuffle the queue client-side
+      if (!current) {
+        const { smartShuffle } = await import('../../shared/smartShuffle');
+        set({ queue: smartShuffle(get().queue) });
+      }
+      return;
+    }
+    const current = get().shuffleEnabled;
+    set({ shuffleEnabled: !current }); // optimistic
+    try {
+      const response = await axios.put(`${getApiBase()}/api/playback/shuffle`, {
+        enabled: !current,
+      });
+      applyServerState(response.data, set, get);
+    } catch (err) {
+      set({ shuffleEnabled: current }); // revert
+      console.error('Failed to toggle shuffle:', err);
+    }
+  },
 
   transferPlayback: async (targetDeviceId: string) => {
     try {
@@ -884,7 +912,7 @@ if (typeof window !== 'undefined') {
       if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
       handleWsDisconnect(event.code);
 
-      if (!settled) {
+      if (!settled && !revoked) {
         settled = true;
         console.log('[OpenTunes] WebSocket disconnected, reconnecting...');
         scheduleReconnect();
@@ -893,7 +921,7 @@ if (typeof window !== 'undefined') {
 
     ws.addEventListener('error', () => {
       clearTimeout(connectTimeout);
-      if (!settled) {
+      if (!settled && !revoked) {
         settled = true;
         handleWsDisconnect(1006);
         scheduleReconnect();

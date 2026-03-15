@@ -17,6 +17,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.provider.MediaStore;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaDescriptionCompat;
 import android.support.v4.media.MediaMetadataCompat;
@@ -117,6 +118,10 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
         return webSocketManager;
     }
 
+    public MediaSessionCompat getMediaSession() {
+        return mediaSession;
+    }
+
     // --- Lifecycle ---
 
     @Override
@@ -190,19 +195,26 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
             case NODE_ALBUMS:
                 // Unique album names, preserving order of first appearance
+                // Track artist and art from the first song in each album
                 Map<String, String> albums = new LinkedHashMap<>();
+                Map<String, String> albumArt = new LinkedHashMap<>();
                 for (Bundle song : library) {
                     String album = song.getString("album", "Unknown Album");
                     if (!albums.containsKey(album)) {
                         String artist = song.getString("artist", "");
                         albums.put(album, artist);
+                        String art = song.getString("art", null);
+                        if (art != null && !art.isEmpty()) {
+                            albumArt.put(album, art);
+                        }
                     }
                 }
                 for (Map.Entry<String, String> entry : albums.entrySet()) {
                     items.add(makeBrowsableItem(
                             PREFIX_ALBUM + entry.getKey(),
                             entry.getKey(),
-                            entry.getValue()));
+                            entry.getValue(),
+                            albumArt.get(entry.getKey())));
                 }
                 break;
 
@@ -250,11 +262,20 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
     private MediaBrowserCompat.MediaItem makeBrowsableItem(String id, String title,
                                                             @Nullable String subtitle) {
+        return makeBrowsableItem(id, title, subtitle, null);
+    }
+
+    private MediaBrowserCompat.MediaItem makeBrowsableItem(String id, String title,
+                                                            @Nullable String subtitle,
+                                                            @Nullable String art) {
         MediaDescriptionCompat.Builder desc = new MediaDescriptionCompat.Builder()
                 .setMediaId(id)
                 .setTitle(title);
         if (subtitle != null) {
             desc.setSubtitle(subtitle);
+        }
+        if (art != null && !art.isEmpty()) {
+            desc.setIconUri(Uri.parse(art));
         }
         return new MediaBrowserCompat.MediaItem(desc.build(),
                 MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
@@ -598,6 +619,26 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
                     actionCallback.onAction("skipToQueueItem:" + id);
                 }
             }
+
+            @Override
+            public void onPlayFromSearch(String query, Bundle extras) {
+                // Voice search from Google Assistant / Android Auto.
+                // Extract structured hints and forward to JS for search + playback.
+                String artist = extras != null ? extras.getString(MediaStore.EXTRA_MEDIA_ARTIST) : null;
+                String album = extras != null ? extras.getString(MediaStore.EXTRA_MEDIA_ALBUM) : null;
+                String title = extras != null ? extras.getString(MediaStore.EXTRA_MEDIA_TITLE) : null;
+                String focus = extras != null ? extras.getString(MediaStore.EXTRA_MEDIA_FOCUS) : null;
+
+                if (actionCallback != null) {
+                    StringBuilder sb = new StringBuilder("playFromSearch:");
+                    sb.append(query != null ? query : "");
+                    if (artist != null && !artist.isEmpty()) sb.append("|artist:").append(artist);
+                    if (album != null && !album.isEmpty()) sb.append("|album:").append(album);
+                    if (title != null && !title.isEmpty()) sb.append("|title:").append(title);
+                    if (focus != null && !focus.isEmpty()) sb.append("|focus:").append(focus);
+                    actionCallback.onAction(sb.toString());
+                }
+            }
         });
         mediaSession.setActive(true);
 
@@ -715,7 +756,8 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
                         PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
                         PlaybackStateCompat.ACTION_SEEK_TO |
                         PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID |
-                        PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM
+                        PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM |
+                        PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH
                 )
                 .setState(state, positionMs, isPlaying ? 1.0f : 0f);
 

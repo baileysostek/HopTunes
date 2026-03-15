@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Typography, Slider } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { usePlayerStore, DeviceInfo } from '../store/playerStore';
@@ -73,6 +73,12 @@ const DeviceIcon: React.FC<{ type: DeviceInfo['type'] }> = ({ type }) => {
   );
 };
 
+const ShuffleIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+  </svg>
+);
+
 const SpeakerIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M17 2H7c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-5 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 16c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm0-10c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/>
@@ -101,6 +107,8 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
   const activeDeviceId = usePlayerStore(s => s.activeDeviceId);
   const thisDeviceId = usePlayerStore(s => s.thisDeviceId);
   const transferPlayback = usePlayerStore(s => s.transferPlayback);
+  const shuffleEnabled = usePlayerStore(s => s.shuffleEnabled);
+  const toggleShuffle = usePlayerStore(s => s.toggleShuffle);
   const syncFromServer = usePlayerStore(s => s.syncFromServer);
 
   const externalArt = useAlbumImage(
@@ -109,10 +117,19 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
   );
 
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
+  const [deviceMenuClosing, setDeviceMenuClosing] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [departingDevices, setDepartingDevices] = useState<DeviceInfo[]>([]);
   const prevDeviceSnapshot = useRef<Map<string, DeviceInfo>>(new Map());
   const prevDeviceIds = useRef<Set<string>>(new Set());
+
+  const closeDeviceMenu = useCallback(() => {
+    setDeviceMenuClosing(true);
+    setTimeout(() => {
+      setDeviceMenuOpen(false);
+      setDeviceMenuClosing(false);
+    }, 150);
+  }, []);
 
   useEffect(() => {
     const currentIds = new Set(devices.map(d => d.id));
@@ -301,6 +318,17 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
             {/* Playback controls */}
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, py: 3 }}>
+              <Box
+                onClick={toggleShuffle}
+                sx={{
+                  color: shuffleEnabled ? theme.palette.primary.main : 'text.secondary',
+                  display: 'flex',
+                  alignItems: 'center',
+                  p: 1,
+                }}
+              >
+                <ShuffleIcon />
+              </Box>
               <Box onClick={prev} sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', p: 1 }}>
                 <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="1" y="2" width="2" height="12" />
@@ -376,7 +404,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             {deviceMenuOpen && (
               <>
               <Box
-                onClick={() => setDeviceMenuOpen(false)}
+                onClick={closeDeviceMenu}
                 sx={{ position: 'fixed', inset: 0, zIndex: 9 }}
               />
               <Box sx={{
@@ -394,7 +422,14 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                   '0%': { opacity: 0, transform: 'translateX(-50%) scale(0.9)' },
                   '100%': { opacity: 1, transform: 'translateX(-50%) scale(1)' },
                 },
-                animation: 'deviceMenuGrow 0.15s cubic-bezier(0.2, 0, 0, 1) forwards',
+                '@keyframes deviceMenuShrink': {
+                  '0%': { opacity: 1, transform: 'translateX(-50%) scale(1)' },
+                  '100%': { opacity: 0, transform: 'translateX(-50%) scale(0.9)' },
+                },
+                animation: deviceMenuClosing
+                  ? 'deviceMenuShrink 0.15s cubic-bezier(0.2, 0, 0, 1) forwards'
+                  : 'deviceMenuGrow 0.15s cubic-bezier(0.2, 0, 0, 1) forwards',
+                pointerEvents: deviceMenuClosing ? 'none' : 'auto',
               }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600, color: 'text.primary', px: 2, py: 1.5 }}>
                   Select a device
@@ -406,7 +441,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                     key={device.id}
                     onClick={isDeparting ? undefined : () => {
                       transferPlayback(device.id);
-                      setDeviceMenuOpen(false);
+                      closeDeviceMenu();
                     }}
                     sx={{
                       display: 'flex',
@@ -539,6 +574,18 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', ml: 1, mr: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 0.5 }}>
           <Box
+            onClick={toggleShuffle}
+            sx={{
+              cursor: 'pointer',
+              color: shuffleEnabled ? theme.palette.primary.main : 'text.secondary',
+              '&:hover': { color: shuffleEnabled ? theme.palette.primary.main : 'text.primary' },
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <ShuffleIcon />
+          </Box>
+          <Box
             onClick={prev}
             sx={{
               cursor: 'pointer',
@@ -668,8 +715,12 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
         <Box sx={{ position: 'relative' }}>
           <Box
             onClick={() => {
-              if (!deviceMenuOpen) syncFromServer();
-              setDeviceMenuOpen(!deviceMenuOpen);
+              if (deviceMenuOpen || deviceMenuClosing) {
+                closeDeviceMenu();
+              } else {
+                syncFromServer();
+                setDeviceMenuOpen(true);
+              }
             }}
             sx={{
               display: 'flex',
@@ -718,7 +769,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
           {deviceMenuOpen && (
             <>
             <Box
-              onClick={() => setDeviceMenuOpen(false)}
+              onClick={closeDeviceMenu}
               sx={{ position: 'fixed', inset: 0, zIndex: 99 }}
             />
             <Box sx={{
@@ -737,7 +788,14 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                 '0%': { opacity: 0, transform: 'scale(0.9)' },
                 '100%': { opacity: 1, transform: 'scale(1)' },
               },
-              animation: 'deviceMenuGrow 0.15s cubic-bezier(0.2, 0, 0, 1) forwards',
+              '@keyframes deviceMenuShrink': {
+                '0%': { opacity: 1, transform: 'scale(1)' },
+                '100%': { opacity: 0, transform: 'scale(0.9)' },
+              },
+              animation: deviceMenuClosing
+                ? 'deviceMenuShrink 0.15s cubic-bezier(0.2, 0, 0, 1) forwards'
+                : 'deviceMenuGrow 0.15s cubic-bezier(0.2, 0, 0, 1) forwards',
+              pointerEvents: deviceMenuClosing ? 'none' : 'auto',
             }}>
               <Typography sx={{
                 fontSize: 12,
@@ -755,7 +813,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                   key={device.id}
                   onClick={isDeparting ? undefined : () => {
                     transferPlayback(device.id);
-                    setDeviceMenuOpen(false);
+                    closeDeviceMenu();
                   }}
                   sx={{
                     display: 'flex',
@@ -802,7 +860,7 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                   <Box sx={{ borderTop: '1px solid', borderTopColor: 'divider', mx: 1, my: 0.5 }} />
                   <Box
                     onClick={() => {
-                      setDeviceMenuOpen(false);
+                      closeDeviceMenu();
                       onConnectClick();
                     }}
                     sx={{

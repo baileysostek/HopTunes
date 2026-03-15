@@ -4,6 +4,7 @@ import {
   PlaybackState,
   ServerPlaybackState,
 } from '../shared/types';
+import { smartShuffle, findSmartInsertPosition } from '../shared/smartShuffle';
 
 // Re-export shared types so existing imports from './playback' still work
 export type { Song as SongInfo, DeviceInfo };
@@ -18,7 +19,11 @@ const state: PlaybackState = {
   updatedAt: Date.now(),
   queue: [],
   history: [],
+  shuffleEnabled: false,
 };
+
+// Original queue order preserved when shuffle is on, so toggling off restores it
+let originalQueue: Song[] = [];
 
 const devices = new Map<string, DeviceInfo>();
 let activeDeviceId: string | null = null;
@@ -126,7 +131,13 @@ export function playWithQueue(song: Song, queue: Song[]): void {
   state.status = 'playing';
   state.position = 0;
   state.updatedAt = Date.now();
-  state.queue = [...queue];
+  if (state.shuffleEnabled) {
+    originalQueue = [...queue];
+    state.queue = smartShuffle(queue);
+  } else {
+    originalQueue = [];
+    state.queue = [...queue];
+  }
 }
 
 export function pause(): void {
@@ -186,20 +197,35 @@ export function skipPrev(): Song | null {
 // Queue operations
 
 export function addToQueue(song: Song): void {
-  state.queue.push(song);
+  if (state.shuffleEnabled) {
+    originalQueue.push(song);
+    const pos = findSmartInsertPosition(state.queue, song);
+    state.queue.splice(pos, 0, song);
+  } else {
+    state.queue.push(song);
+  }
 }
 
 export function addToQueueNext(song: Song): void {
   state.queue.unshift(song);
+  if (state.shuffleEnabled) {
+    originalQueue.unshift(song);
+  }
 }
 
 export function removeFromQueue(index: number): Song | null {
   if (index < 0 || index >= state.queue.length) return null;
-  return state.queue.splice(index, 1)[0];
+  const removed = state.queue.splice(index, 1)[0];
+  if (state.shuffleEnabled) {
+    const origIdx = originalQueue.findIndex(s => s.hash === removed.hash && s.path === removed.path);
+    if (origIdx >= 0) originalQueue.splice(origIdx, 1);
+  }
+  return removed;
 }
 
 export function clearQueue(): void {
   state.queue = [];
+  originalQueue = [];
 }
 
 export function moveInQueue(fromIndex: number, toIndex: number): boolean {
@@ -212,18 +238,35 @@ export function moveInQueue(fromIndex: number, toIndex: number): boolean {
   return true;
 }
 
+// --- Shuffle ---
+
+export function setShuffle(enabled: boolean): void {
+  state.shuffleEnabled = enabled;
+  if (enabled) {
+    originalQueue = [...state.queue];
+    state.queue = smartShuffle(state.queue);
+  } else {
+    // Restore original order, but only songs still in the shuffled queue
+    const currentHashes = new Set(state.queue.map(s => s.path));
+    state.queue = originalQueue.filter(s => currentHashes.has(s.path));
+    originalQueue = [];
+  }
+}
+
+export function getShuffleEnabled(): boolean {
+  return state.shuffleEnabled;
+}
+
 // --- Resilience ---
 
-/**
- * Handle the case where the current song's source device has gone offline
- * and the file is not cached. If the same hash exists on another source
- * (another edge device or the host), swap the path. Otherwise, skip to next.
- */
 /**
  * Remove all queued songs sourced from the given device.
  */
 export function purgeDeviceFromQueue(deviceId: string): void {
   state.queue = state.queue.filter(s => s.origin?.deviceId !== deviceId);
+  if (state.shuffleEnabled) {
+    originalQueue = originalQueue.filter(s => s.origin?.deviceId !== deviceId);
+  }
 }
 
 /**
@@ -279,6 +322,8 @@ export function __resetForTesting(): void {
   state.updatedAt = Date.now();
   state.queue = [];
   state.history = [];
+  state.shuffleEnabled = false;
+  originalQueue = [];
   devices.clear();
   activeDeviceId = null;
   listeners.clear();

@@ -90,12 +90,14 @@ export async function registerEdgeLibrary(
   // Notify all clients about sync status (skip for re-announcements)
   if (broadcastFn && songs.length > 0 && !isReannounce) {
     broadcastFn({ type: 'edge-sync-start', deviceName, songCount: songs.length });
+  }
 
-    if (!syncing) {
-      // Edge device is done hashing — defer the sync-done until after
-      // the debounced library broadcast so the banner is visible
-      pendingSyncDone.set(deviceName, deviceId);
-    }
+  // Queue sync-done when the edge device is done hashing, even for
+  // re-announcements — index.ts sends edge-sync-start on every connect,
+  // so we must always close it. The client-side finishEdgeSync is a no-op
+  // if no sync banner is active for this device.
+  if (broadcastFn && !syncing && songs.length > 0) {
+    pendingSyncDone.set(deviceName, deviceId);
   }
 
   await broadcastUnifiedLibrary();

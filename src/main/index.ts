@@ -161,7 +161,7 @@ const createWindow = async (): Promise<void> => {
 
   const expressApp = express();
   expressApp.use(cors());
-  expressApp.use(express.json());
+  expressApp.use(express.json({ limit: '10mb' }));
 
   // Auth middleware — local requests pass through, remote requests need a token
   expressApp.use('/api', (req, res, next) => {
@@ -246,8 +246,12 @@ const createWindow = async (): Promise<void> => {
         updateEdgeDeviceWs(device.id, ws);
         broadcastState();
 
-        // Always show sync banner when an edge device connects.
-        broadcastToClients({ type: 'edge-sync-start', deviceName: device.name, songCount: 0 });
+        // Show sync banner when an edge device connects for the first time.
+        // Skip on grace-period reconnects to avoid a brief banner flash — the
+        // device will re-announce its cached library almost immediately.
+        if (!gracePeriodTimer) {
+          broadcastToClients({ type: 'edge-sync-start', deviceName: device.name, songCount: 0 });
+        }
       } else {
         // Local (desktop) clients: register immediately via query params so the
         // device appears in the device list before the welcome message is built.
