@@ -51,9 +51,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   hideSong: async (song) => {
-    const diskPath = decodeURIComponent(song.path.replace(AUDIO_PATH_PREFIX, ''));
     try {
-      await axios.post(`${getApiBase()}/api/library/hide`, { path: diskPath });
+      if (song.origin) {
+        // Edge device song — hide by hash
+        await axios.post(`${getApiBase()}/api/library/hide`, { hash: song.hash });
+      } else {
+        const diskPath = decodeURIComponent(song.path.replace(AUDIO_PATH_PREFIX, ''));
+        await axios.post(`${getApiBase()}/api/library/hide`, { path: diskPath });
+      }
       // Optimistically remove from local state (server also broadcasts updated library)
       set({ songs: get().songs.filter(s => s.path !== song.path) });
     } catch (err) {

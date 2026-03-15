@@ -6,7 +6,7 @@ import { app } from 'electron';
 import { parseFile } from 'music-metadata';
 import { ServerWsMessage, AUDIO_PATH_PREFIX } from '../../shared/types';
 import { mapHostSongRows } from '../../shared/federation';
-import { getAllSongs, hideSongByPath, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation, findSongWithArtForAlbum } from '../database';
+import { getAllSongs, hideSongByPath, hideEdgeSongByHash, setSongHidden, getAlbumSongs, getCachedArtistImage, cacheArtistImage, getCachedAlbumArt, cacheAlbumArt, getMediaLocations, addMediaLocation, removeMediaLocation, findSongWithArtForAlbum } from '../database';
 import { indexLibrary, indexSingleFolder } from '../indexer';
 import { MUSIC_DIR } from '../config';
 import { isLocalAddress } from '../auth';
@@ -95,15 +95,19 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
   });
 
-  // POST /api/library/hide — hide a song by its file path
+  // POST /api/library/hide — hide a song by file path (host) or hash (edge)
   router.post('/library/hide', async (req: Request, res: Response) => {
-    const { path: songPath } = req.body;
-    if (!songPath || typeof songPath !== 'string') {
-      res.status(400).json({ error: 'missing path' });
+    const { path: songPath, hash } = req.body;
+    if ((!songPath || typeof songPath !== 'string') && (!hash || typeof hash !== 'string')) {
+      res.status(400).json({ error: 'missing path or hash' });
       return;
     }
     try {
-      await hideSongByPath(songPath);
+      if (hash) {
+        await hideEdgeSongByHash(hash);
+      } else {
+        await hideSongByPath(songPath);
+      }
       const library = await getUnifiedLibrary();
       deps.broadcastToClients({ type: 'library', data: library });
       res.json({ ok: true });

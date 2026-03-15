@@ -21,6 +21,11 @@ import {
   GET_MEDIA_LOCATIONS_SQL,
   ADD_MEDIA_LOCATION_SQL,
   DELETE_MEDIA_LOCATION_SQL,
+  CREATE_HIDDEN_EDGE_SONGS_TABLE,
+  HIDE_EDGE_SONG_SQL,
+  UNHIDE_EDGE_SONG_SQL,
+  GET_HIDDEN_EDGE_HASHES_SQL,
+  DELETE_HIDDEN_EDGE_HASHES_SQL,
 } from '../shared/db-schema';
 
 // Re-export SongRow so existing imports from './database' still work
@@ -85,6 +90,7 @@ export async function initDatabase(): Promise<void> {
           )
         `);
         await run(CREATE_MEDIA_LOCATIONS_TABLE);
+        await run(CREATE_HIDDEN_EDGE_SONGS_TABLE);
         resolve();
       } catch (e) {
         reject(e);
@@ -121,6 +127,27 @@ export async function hideSongByPath(filePath: string): Promise<void> {
 
 export async function setSongHidden(filePath: string, hidden: boolean): Promise<void> {
   await run(SET_SONG_HIDDEN_SQL, [hidden ? 1 : 0, filePath]);
+}
+
+// --- Hidden edge songs ---
+
+export async function hideEdgeSongByHash(hash: string): Promise<void> {
+  await run(HIDE_EDGE_SONG_SQL, [hash]);
+}
+
+export async function unhideEdgeSongByHash(hash: string): Promise<void> {
+  await run(UNHIDE_EDGE_SONG_SQL, [hash]);
+}
+
+export async function getHiddenEdgeHashes(): Promise<Set<string>> {
+  const rows = await all<{ hash: string }>(GET_HIDDEN_EDGE_HASHES_SQL);
+  return new Set(rows.map(r => r.hash));
+}
+
+export async function removeHiddenEdgeHashes(hashes: string[]): Promise<void> {
+  if (hashes.length === 0) return;
+  const placeholders = hashes.map(() => '?').join(',');
+  await run(`${DELETE_HIDDEN_EDGE_HASHES_SQL}(${placeholders})`, hashes);
 }
 
 export async function getAlbumSongs(artist: string, album: string): Promise<SongRow[]> {

@@ -11,7 +11,7 @@ import { WebSocket } from 'ws';
 import { Response } from 'express';
 import { Song, EdgeSongMeta, ServerWsMessage } from '../shared/types';
 import { mapHostSongRows, mapEdgeSongs, deduplicateSongs, mergeLibraries, EdgeLibraryEntry } from '../shared/federation';
-import { getAllSongs } from './database';
+import { getAllSongs, getHiddenEdgeHashes, removeHiddenEdgeHashes } from './database';
 import { handleSongSourceLost, purgeDeviceFromQueue, getPlaybackState } from './playback';
 
 // --- Types ---
@@ -156,9 +156,24 @@ export async function unregisterEdgeDevice(deviceId: string): Promise<void> {
   }
   currentStreamingRequest.delete(deviceId);
 
+  // Collect hashes from this device before removing it
+  const departingHashes = new Set(device.songs.map(s => s.hash).filter(h => h));
+
   edgeDevices.delete(deviceId);
   pendingSyncDone.delete(device.deviceName);
   console.log(`[Federation] Unregistered edge device ${device.deviceName} (${deviceId})`);
+
+  // Clean up hidden edge hashes that no longer exist on any remaining edge device
+  if (departingHashes.size > 0) {
+    for (const [, remaining] of edgeDevices) {
+      for (const song of remaining.songs) {
+        if (song.hash) departingHashes.delete(song.hash);
+      }
+    }
+    if (departingHashes.size > 0) {
+      await removeHiddenEdgeHashes([...departingHashes]);
+    }
+  }
 
   // Remove queued songs from this device
   purgeDeviceFromQueue(deviceId);
@@ -205,8 +220,9 @@ export async function getUnifiedLibrary(): Promise<Song[]> {
     onlineDevices.add(deviceId);
   }
 
+  const hiddenEdgeHashes = await getHiddenEdgeHashes();
   const merged = mergeLibraries(hostSongs, edgeLibraries, onlineDevices);
-  return merged.filter(song => !song.hidden);
+  return merged.filter(song => !song.hidden && !(song.origin && song.hash && hiddenEdgeHashes.has(song.hash)));
 }
 
 /** Check if an edge device is currently registered and connected. */

@@ -98,6 +98,22 @@ export const ADD_MEDIA_LOCATION_SQL = 'INSERT OR IGNORE INTO media_locations (pa
 
 export const DELETE_MEDIA_LOCATION_SQL = 'DELETE FROM media_locations WHERE path = ?';
 
+// --- Hidden edge songs (persists hide state for songs that only exist on edge devices) ---
+
+export const CREATE_HIDDEN_EDGE_SONGS_TABLE = `
+  CREATE TABLE IF NOT EXISTS hidden_edge_songs (
+    hash TEXT PRIMARY KEY NOT NULL
+  )
+`;
+
+export const HIDE_EDGE_SONG_SQL = 'INSERT OR IGNORE INTO hidden_edge_songs (hash) VALUES (?)';
+
+export const UNHIDE_EDGE_SONG_SQL = 'DELETE FROM hidden_edge_songs WHERE hash = ?';
+
+export const GET_HIDDEN_EDGE_HASHES_SQL = 'SELECT hash FROM hidden_edge_songs';
+
+export const DELETE_HIDDEN_EDGE_HASHES_SQL = 'DELETE FROM hidden_edge_songs WHERE hash IN ';
+
 // --- Abstract adapter interface ---
 
 export interface DatabaseAdapter {
