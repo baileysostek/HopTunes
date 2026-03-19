@@ -32,7 +32,9 @@ interface SyncState {
 }
 
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+let syncSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 const DISMISS_DELAY = 3000;
+const SYNC_SAFETY_TIMEOUT = 30_000; // auto-dismiss stuck banners after 30s
 
 export const useSyncStore = create<SyncState>((set, get) => ({
   active: false,
@@ -53,11 +55,21 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   })),
   startEdgeSync: (deviceName, songCount) => {
     if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
+    if (syncSafetyTimer) { clearTimeout(syncSafetyTimer); syncSafetyTimer = null; }
     set({ active: true, phase: 'syncing', deviceName, songCount });
+    // Safety net: auto-dismiss if sync never completes (e.g. missed done/cancel message)
+    syncSafetyTimer = setTimeout(() => {
+      syncSafetyTimer = null;
+      const s = get();
+      if (s.phase === 'syncing' && s.deviceName === deviceName) {
+        set({ active: false });
+      }
+    }, SYNC_SAFETY_TIMEOUT);
   },
   finishEdgeSync: (deviceName, newSongCount) => {
     const state = get();
     if (state.phase === 'syncing' && state.deviceName === deviceName) {
+      if (syncSafetyTimer) { clearTimeout(syncSafetyTimer); syncSafetyTimer = null; }
       set({ phase: 'done', songCount: newSongCount });
       dismissTimer = setTimeout(() => {
         dismissTimer = null;
@@ -69,6 +81,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     const state = get();
     if (state.phase === 'syncing' && state.deviceName === deviceName) {
       if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
+      if (syncSafetyTimer) { clearTimeout(syncSafetyTimer); syncSafetyTimer = null; }
       set({ active: false });
     }
   },

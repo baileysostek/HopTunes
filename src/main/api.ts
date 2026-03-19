@@ -57,6 +57,18 @@ export const setupIpcHandlers = (window: BrowserWindow): void => {
     return result.filePaths[0];
   });
 
+  ipcMain.handle('select-image', async () => {
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openFile'],
+      title: 'Select Album Art',
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const filePath = result.filePaths[0];
+    const data = fs.readFileSync(filePath);
+    return data.toString('base64');
+  });
+
   ipcMain.handle('save-game', async (event : IpcMainEvent, saveName : string, saveData : object) => {
     fs.writeFileSync(`./${saveName}.json`, JSON.stringify(saveData, null, 2))
   });

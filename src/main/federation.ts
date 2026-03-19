@@ -100,6 +100,12 @@ export async function registerEdgeLibrary(
     pendingSyncDone.set(deviceName, deviceId);
   }
 
+  // If the device has no songs, close the sync banner that was opened on
+  // connect (index.ts broadcasts edge-sync-start for every new connection).
+  if (broadcastFn && songs.length === 0 && !syncing) {
+    broadcastFn({ type: 'edge-sync-done', deviceName, newSongCount: 0 });
+  }
+
   await broadcastUnifiedLibrary();
 }
 
@@ -632,7 +638,19 @@ export async function getUnifiedLibraryNow(): Promise<Song[]> {
     clearTimeout(broadcastTimer);
     broadcastTimer = null;
   }
-  return getUnifiedLibrary();
+  const library = await getUnifiedLibrary();
+
+  // Flush any pending sync-done notifications that the cancelled debounce
+  // timer would have sent — otherwise the sync banner stays stuck.
+  if (broadcastFn && pendingSyncDone.size > 0) {
+    for (const [deviceName, deviceId] of pendingSyncDone) {
+      const newSongCount = library.filter(s => s.origin?.deviceId === deviceId).length;
+      broadcastFn({ type: 'edge-sync-done', deviceName, newSongCount });
+    }
+    pendingSyncDone.clear();
+  }
+
+  return library;
 }
 
 /** Remove a single requestId from the per-device active request set. */

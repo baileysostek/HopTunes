@@ -5,6 +5,7 @@ import { useLibraryStore } from '../store/libraryStore';
 import { usePlayerStore } from '../store/playerStore';
 import AlbumSection from '../components/AlbumSection';
 import { Song, getMediaUrl } from '../types/song';
+import { normalize } from '../../shared/search';
 import { useArtistImage } from '../hooks/useArtistImage';
 
 type ListItem =
@@ -194,11 +195,11 @@ const Home = () => {
     }
 
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+      const q = normalize(searchQuery);
       result = result.filter(s =>
-        s.title.toLowerCase().includes(q) ||
-        s.artist.toLowerCase().includes(q) ||
-        s.album.toLowerCase().includes(q)
+        normalize(s.title).includes(q) ||
+        normalize(s.artist).includes(q) ||
+        normalize(s.album).includes(q)
       );
     }
 

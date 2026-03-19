@@ -1,5 +1,10 @@
 import type { Song } from './types';
 
+/** Strip common punctuation so "its only" matches "it's only", etc. */
+export function normalize(s: string): string {
+  return s.toLowerCase().replace(/[''`\-.,!?]/g, '');
+}
+
 export interface SearchHints {
   artist?: string;
   album?: string;
@@ -12,33 +17,33 @@ export interface SearchHints {
  * (e.g. from Android voice search extras). Returns songs sorted by relevance.
  */
 export function searchSongs(songs: Song[], query: string, hints?: SearchHints): Song[] {
-  const q = query.toLowerCase().trim();
+  const q = normalize(query.trim());
   if (!q && !hints?.artist && !hints?.album && !hints?.title) return [];
 
   const scored: { song: Song; score: number }[] = [];
 
   for (const song of songs) {
     let score = 0;
-    const titleLower = song.title.toLowerCase();
-    const artistLower = song.artist.toLowerCase();
-    const albumLower = song.album.toLowerCase();
+    const titleNorm = normalize(song.title);
+    const artistNorm = normalize(song.artist);
+    const albumNorm = normalize(song.album);
 
     // Structured hints from voice search get high priority
-    if (hints?.title && titleLower.includes(hints.title.toLowerCase())) score += 100;
-    if (hints?.artist && artistLower.includes(hints.artist.toLowerCase())) score += 50;
-    if (hints?.album && albumLower.includes(hints.album.toLowerCase())) score += 30;
+    if (hints?.title && titleNorm.includes(normalize(hints.title))) score += 100;
+    if (hints?.artist && artistNorm.includes(normalize(hints.artist))) score += 50;
+    if (hints?.album && albumNorm.includes(normalize(hints.album))) score += 30;
 
     // Unstructured query matching
     if (q) {
-      if (titleLower === q) score += 80;
-      else if (titleLower.startsWith(q)) score += 60;
-      else if (titleLower.includes(q)) score += 40;
+      if (titleNorm === q) score += 80;
+      else if (titleNorm.startsWith(q)) score += 60;
+      else if (titleNorm.includes(q)) score += 40;
 
-      if (artistLower === q) score += 70;
-      else if (artistLower.includes(q)) score += 35;
+      if (artistNorm === q) score += 70;
+      else if (artistNorm.includes(q)) score += 35;
 
-      if (albumLower === q) score += 50;
-      else if (albumLower.includes(q)) score += 25;
+      if (albumNorm === q) score += 50;
+      else if (albumNorm.includes(q)) score += 25;
     }
 
     if (score > 0) scored.push({ song, score });

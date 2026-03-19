@@ -23,6 +23,7 @@ import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as http from 'http';
 import express from 'express';
+import * as path from 'path';
 
 // --- Rate-limited WS parse error logger ---
 let wsParseErrorCount = 0;
@@ -125,6 +126,7 @@ const createWindow = async (): Promise<void> => {
     minHeight: 600,
     minWidth: 900,
     frame: false,
+    icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       contextIsolation: true,

@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Open a folder picker dialog
   selectFolder: () => ipcRenderer.invoke('select-folder') as Promise<string | null>,
 
+  // Open an image file picker dialog (returns base64 image data or null)
+  selectImage: () => ipcRenderer.invoke('select-image') as Promise<string | null>,
+
   // Window controls for custom titlebar
   windowMinimize: () => ipcRenderer.send('window-minimize'),
   windowMaximize: () => ipcRenderer.send('window-maximize'),

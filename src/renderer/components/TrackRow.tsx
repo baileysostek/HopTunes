@@ -5,6 +5,7 @@ import { Song } from '../types/song';
 import { usePlayerStore } from '../store/playerStore';
 import { useContextMenuStore } from './SongContextMenu';
 import { isMobile } from '../utils/platform';
+import ExplicitBadge, { stripExplicitTag } from './ExplicitBadge';
 
 interface TrackRowProps {
   track: Song;
@@ -26,6 +27,8 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) 
   const isActive = currentTrack?.path === track.path;
   const theme = useTheme();
   const mobile = isMobile();
+
+  const { clean: titleClean, isExplicit } = stripExplicitTag(track.title);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -78,8 +81,12 @@ const TrackRow: React.FC<TrackRowProps> = ({ track, index, onPlay, departing }) 
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.5,
       }}>
-        {track.title}
+        {titleClean}
+        {isExplicit && <ExplicitBadge size={13} />}
       </Typography>
       {!mobile && (
         <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>

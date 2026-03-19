@@ -7,6 +7,7 @@ import { getMediaUrl, Song } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
 import { useCachedArt } from '../hooks/useCachedArt';
 import { isMobile } from '../utils/platform';
+import ExplicitBadge, { stripExplicitTag } from './ExplicitBadge';
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '--:--';
@@ -93,7 +94,8 @@ const QueueItem: React.FC<QueueItemProps> = ({
           alignItems: 'center',
           gap: 0.5,
         }}>
-          {song.title}
+          {stripExplicitTag(song.title).clean}
+          {stripExplicitTag(song.title).isExplicit && <ExplicitBadge size={12} />}
           {song.origin && (
             <Tooltip title={song.origin.deviceName} arrow placement="top">
               <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', color: 'text.disabled', flexShrink: 0 }}>
@@ -151,7 +153,6 @@ const QueuePanel: React.FC = () => {
   const queue = usePlayerStore(s => s.queue);
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const queueVisible = usePlayerStore(s => s.queueVisible);
-  const toggleQueue = usePlayerStore(s => s.toggleQueue);
   const moveInQueue = usePlayerStore(s => s.moveInQueue);
   const removeFromQueue = usePlayerStore(s => s.removeFromQueue);
   const shuffleEnabled = usePlayerStore(s => s.shuffleEnabled);
@@ -245,8 +246,12 @@ const QueuePanel: React.FC = () => {
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
           }}>
-            {currentTrack.title}
+            {stripExplicitTag(currentTrack.title).clean}
+            {stripExplicitTag(currentTrack.title).isExplicit && <ExplicitBadge size={12} />}
           </Typography>
           <Typography sx={{
             fontSize: 11,
@@ -310,44 +315,15 @@ const QueuePanel: React.FC = () => {
     </Box>
   );
 
-  // On mobile, render as a full-screen overlay
+  // On mobile, render as inline tab content
   if (mobile) {
-    if (!queueVisible) return null;
     return (
       <Box sx={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        bgcolor: 'background.default',
-        zIndex: 1400,
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
-        paddingTop: 'env(safe-area-inset-top)',
+        height: '100%',
+        bgcolor: 'background.default',
       }}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          px: 2,
-          pt: 2,
-          pb: 1.5,
-          borderBottom: '1px solid',
-          borderBottomColor: 'divider',
-        }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 700, color: 'text.primary' }}>
-            Queue
-          </Typography>
-          <Box
-            onClick={toggleQueue}
-            sx={{ cursor: 'pointer', color: 'text.secondary', display: 'flex', alignItems: 'center', p: 1 }}
-          >
-            <RemoveIcon />
-          </Box>
-        </Box>
-
         {nowPlayingSection}
         {upNextContent}
       </Box>

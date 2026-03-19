@@ -319,6 +319,40 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     }
   });
 
+  // POST /api/album-art/set — set custom album art from base64 image data
+  router.post('/album-art/set', async (req: Request, res: Response) => {
+    const { artist, album, data } = req.body as { artist?: string; album?: string; data?: string };
+    if (!artist || !album || !data) {
+      res.status(400).json({ error: 'missing artist, album, or data' });
+      return;
+    }
+    try {
+      const buffer = Buffer.from(data, 'base64');
+      const cacheKey = `custom:${artist}:${album}`;
+      cacheArtToDisk(cacheKey, buffer);
+      const thumb = `/api/art/custom?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`;
+      await cacheAlbumArt(artist, album, thumb);
+      res.json({ ok: true, thumb });
+    } catch (err) {
+      console.error('Failed to set album art:', err);
+      res.status(500).json({ error: 'Failed to set album art' });
+    }
+  });
+
+  // GET /api/art/custom — serve custom album art
+  router.get('/art/custom', (req: Request, res: Response) => {
+    const artist = req.query.artist as string | undefined;
+    const album = req.query.album as string | undefined;
+    if (!artist || !album) {
+      res.status(400).json({ error: 'missing ?artist= and ?album= parameters' });
+      return;
+    }
+    const cacheKey = `custom:${artist}:${album}`;
+    if (!serveArtFromCache(cacheKey, res)) {
+      res.status(404).send('No custom artwork');
+    }
+  });
+
   // GET /api/audio/:file — stream an audio file (with path traversal protection)
   router.get('/audio/:file', async (req: Request, res: Response) => {
     const filePath = decodeURIComponent(req.params.file);
@@ -362,7 +396,11 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       });
       stream.pipe(res);
     } else {
-      res.writeHead(200, { 'Content-Type': contentType });
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+      });
       fs.createReadStream(filePath).pipe(res);
     }
   });

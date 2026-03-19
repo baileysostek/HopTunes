@@ -44,6 +44,13 @@ function fetchAlbumImage(artist: string, album: string): Promise<string | null> 
  * Resolution order: host library → edge devices → TheAudioDB (last resort).
  * Results are permanently cached in SQLite (never expires) and in-memory.
  */
+/** Invalidate the in-memory cache for a specific album so the next render re-fetches. */
+export function invalidateAlbumImage(artist: string, album: string): void {
+  const key = cacheKey(artist, album);
+  cache.delete(key);
+  pending.delete(key);
+}
+
 export function useAlbumImage(artist: string, album: string): string | null {
   const key = cacheKey(artist, album);
   const cached = cache.get(key);

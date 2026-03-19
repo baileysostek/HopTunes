@@ -6,6 +6,7 @@ import { getMediaUrl } from '../types/song';
 import { useAlbumImage } from '../hooks/useAlbumImage';
 import { useCachedArt } from '../hooks/useCachedArt';
 import { isMobile } from '../utils/platform';
+import ExplicitBadge, { stripExplicitTag } from './ExplicitBadge';
 
 function formatTime(seconds: number): string {
   if (!seconds || isNaN(seconds)) return '0:00';
@@ -166,6 +167,21 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
   const cachedArt = useCachedArt(currentTrack?.art);
   const artSrc = cachedArt ?? externalArt ?? null;
+  const { clean: titleClean, isExplicit } = stripExplicitTag(currentTrack?.title ?? '');
+
+  // Swipe down to close expanded player (standard mobile music player UX)
+  const touchStartRef = useRef({ x: 0, y: 0 });
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, []);
+  const handleExpandedSwipeEnd = useCallback((e: React.TouchEvent) => {
+    if (deviceMenuOpen) return;
+    const deltaY = e.changedTouches[0].clientY - touchStartRef.current.y;
+    const deltaX = Math.abs(touchStartRef.current.x - e.changedTouches[0].clientX);
+    if (deltaY > 50 && deltaY > deltaX) {
+      setMobileExpanded(false);
+    }
+  }, [deviceMenuOpen]);
 
   // ── Mobile: compact bar + expandable full-screen player ──
   if (mobile) {
@@ -206,8 +222,9 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
           {/* Track info */}
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {currentTrack?.title || 'No track playing'}
+            <Typography sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {currentTrack ? titleClean : 'No track playing'}
+              {isExplicit && <ExplicitBadge size={12} />}
             </Typography>
             {currentTrack && (
               <Typography sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -231,9 +248,11 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
           </Box>
         </Box>
 
-        {/* Expanded full-screen player */}
-        {mobileExpanded && (
-          <Box sx={{
+        {/* Expanded full-screen player — always mounted, animated via transform */}
+        <Box
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleExpandedSwipeEnd}
+          sx={{
             position: 'fixed',
             top: 0,
             left: 0,
@@ -245,6 +264,10 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
             flexDirection: 'column',
             overflow: 'hidden',
             paddingTop: 'env(safe-area-inset-top)',
+            transform: mobileExpanded ? 'translateY(0)' : 'translateY(100%)',
+            transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+            willChange: 'transform',
+            pointerEvents: mobileExpanded ? 'auto' : 'none',
           }}>
             {/* Close handle */}
             <Box
@@ -284,8 +307,9 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
 
             {/* Track info */}
             <Box sx={{ px: 4, pt: 2, pb: 1 }}>
-              <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {currentTrack?.title || 'No track'}
+              <Typography sx={{ fontSize: 22, fontWeight: 700, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                {currentTrack ? titleClean : 'No track'}
+                {isExplicit && <ExplicitBadge size={18} />}
               </Typography>
               <Typography sx={{ fontSize: 16, color: 'text.secondary' }}>
                 {currentTrack?.artist || ''}
@@ -361,12 +385,15 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               </Box>
             </Box>
 
-            {/* Queue toggle + Device picker */}
+            {/* Queue + Device picker */}
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 3, pb: 4 }}>
               <Box
-                onClick={toggleQueue}
+                onClick={() => {
+                  usePlayerStore.setState({ queueVisible: true });
+                  setMobileExpanded(false);
+                }}
                 sx={{
-                  color: queueVisible ? theme.palette.primary.main : 'text.secondary',
+                  color: 'text.secondary',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 0.5,
@@ -484,7 +511,6 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
               </>
             )}
           </Box>
-        )}
       </>
     );
   }
@@ -549,8 +575,12 @@ const NowPlayingBar: React.FC<NowPlayingBarProps> = ({ onConnectClick }) => {
                 whiteSpace: 'nowrap',
                 textOverflow: 'ellipsis',
                 overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
               }}>
-                {currentTrack.title}
+                {titleClean}
+                {isExplicit && <ExplicitBadge size={13} />}
               </Typography>
               <Typography sx={{
                 fontSize: 12,

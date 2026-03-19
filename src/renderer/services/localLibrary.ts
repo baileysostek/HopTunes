@@ -85,7 +85,11 @@ export async function initLocalLibrary(
   // Initialize the edge SQLite database
   await ensureDbInitialized();
 
-  // Scan local library and announce to host
+  // Immediately announce cached library from SQLite so the host knows about
+  // our songs right away, before the full MediaStore scan completes.
+  await announceCachedLibrary();
+
+  // Scan local library and announce to host (will update with fresh data)
   await scanAndAnnounce();
 
   // Re-scan when app returns to foreground (if enough time has passed)
@@ -159,6 +163,36 @@ export function getLocalFileUrl(localPath: string): string {
 }
 
 // --- Internal ---
+
+/**
+ * Load cached songs from local SQLite and announce them to the host immediately.
+ * This lets the host know about our library before the full MediaStore scan finishes,
+ * so the user sees their songs right away on boot.
+ */
+async function announceCachedLibrary(): Promise<void> {
+  try {
+    const rows = await edgeDatabase.getAllSongs();
+    if (rows.length === 0) return;
+
+    localSongs = rows.map(row => ({
+      localPath: row.file_path,
+      title: row.title,
+      artist: row.artist,
+      album: row.album,
+      duration: row.duration,
+      trackNumber: row.track_number,
+      hash: row.hash,
+      hasArt: !!row.has_art,
+      mimeType: '',   // Not stored in SQLite; will be filled by the full scan
+      fileSize: 0,    // Not stored in SQLite; will be filled by the full scan
+    }));
+
+    announceToHost();
+    console.log(`[LocalLibrary] Announced ${localSongs.length} cached songs from SQLite`);
+  } catch (err) {
+    console.error('[LocalLibrary] Failed to announce cached library:', err);
+  }
+}
 
 async function scanAndAnnounce(): Promise<void> {
   const sync = useSyncStore.getState();

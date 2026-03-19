@@ -13,6 +13,7 @@ declare global {
       loadGame: (saveName: string) => Promise<object>;
       showItemInFolder: (filePath: string) => void;
       selectFolder: () => Promise<string | null>;
+      selectImage: () => Promise<string | null>;
       windowMinimize: () => void;
       windowMaximize: () => void;
       windowClose: () => void;

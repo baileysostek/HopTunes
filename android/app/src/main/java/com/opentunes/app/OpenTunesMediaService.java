@@ -101,6 +101,9 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
     private boolean nativePlayerPrepared = false;
     private Handler mainHandler;
 
+    // Whether this device is currently the active player (set by server state)
+    private boolean isActiveDevice = false;
+
     // Audio focus
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
@@ -355,11 +358,20 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
                                          String artUrl, long durationMs,
                                          boolean isPlaying, long positionMs,
                                          boolean isActiveDevice) {
-        // Always update lock screen metadata and notification
+        // Always update lock screen metadata and notification.
+        // When the queue empties, currentSong is null so title will be null —
+        // reset to defaults so the notification doesn't show stale song info.
         if (title != null) {
             updateMetadata(title, artist, album, artUrl, durationMs);
+        } else {
+            updateMetadata("OpenTunes", "", "", null, 0);
         }
         updatePlaybackState(isPlaying, positionMs);
+
+        // Track whether this device is the active player so lock-screen
+        // button handlers (nativeResume/nativePause) know whether to touch
+        // the native MediaPlayer or just forward the command to the server.
+        this.isActiveDevice = isActiveDevice;
 
         if (!isActiveDevice) {
             // Not the active player — stop native audio if playing
@@ -440,10 +452,21 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
             Log.d(TAG, "MediaPlayer prepared");
 
             if (pendingSeekMs > 0) {
+                // For HTTP streams, seekTo is async — wait for seek to
+                // complete before starting playback so the player doesn't
+                // try to decode from the wrong position.
+                if (pendingPlay) {
+                    mp.setOnSeekCompleteListener(player -> {
+                        player.setOnSeekCompleteListener(null);
+                        if (requestAudioFocus()) {
+                            player.start();
+                            Log.d(TAG, "MediaPlayer started after seek");
+                        }
+                    });
+                }
                 mp.seekTo((int) pendingSeekMs);
                 pendingSeekMs = 0;
-            }
-            if (pendingPlay) {
+            } else if (pendingPlay) {
                 if (requestAudioFocus()) {
                     mp.start();
                     Log.d(TAG, "MediaPlayer started playback");
@@ -494,7 +517,10 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
     /** Resume playback: start native player + tell server. */
     private void nativeResume() {
-        if (nativePlayer != null && nativePlayerPrepared && !nativePlayer.isPlaying()) {
+        // Only touch the native MediaPlayer if this device is the active player.
+        // Otherwise we're just a remote control for the host — starting the local
+        // player would briefly play audio out of this device's speakers.
+        if (isActiveDevice && nativePlayer != null && nativePlayerPrepared && !nativePlayer.isPlaying()) {
             if (requestAudioFocus()) {
                 try { nativePlayer.start(); } catch (Exception ignored) {}
             }
@@ -506,7 +532,8 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
     /** Pause playback: pause native player + tell server. */
     private void nativePause() {
-        if (nativePlayer != null && nativePlayerPrepared) {
+        // Only touch the native MediaPlayer if this device is the active player.
+        if (isActiveDevice && nativePlayer != null && nativePlayerPrepared) {
             try {
                 if (nativePlayer.isPlaying()) {
                     currentPosition = nativePlayer.getCurrentPosition();
@@ -521,7 +548,8 @@ public class OpenTunesMediaService extends MediaBrowserServiceCompat {
 
     /** Seek native player + tell server. */
     private void nativeSeek(long posMs) {
-        if (nativePlayer != null && nativePlayerPrepared) {
+        // Only touch the native MediaPlayer if this device is the active player.
+        if (isActiveDevice && nativePlayer != null && nativePlayerPrepared) {
             try { nativePlayer.seekTo((int) posMs); } catch (Exception ignored) {}
         }
         currentPosition = posMs;

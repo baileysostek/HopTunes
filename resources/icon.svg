@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1B2838"/>
+      <stop offset="100%" stop-color="#0F1923"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="386" x2="0" y2="126" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00897B"/>
+      <stop offset="100%" stop-color="#4DB6AC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- Equalizer bars (vertically centered at y=256) -->
+  <rect x="116" y="206" width="40" height="100" rx="8" fill="url(#bar)"/>
+  <rect x="176" y="156" width="40" height="200" rx="8" fill="url(#bar)"/>
+  <rect x="236" y="126" width="40" height="260" rx="8" fill="url(#bar)"/>
+  <rect x="296" y="146" width="40" height="220" rx="8" fill="url(#bar)"/>
+  <rect x="356" y="186" width="40" height="140" rx="8" fill="url(#bar)"/>
+</svg>

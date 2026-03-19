@@ -19,6 +19,5 @@ export const mainConfig: Configuration = {
   },
   externals: {
     'music-metadata': 'commonjs2 music-metadata',
-    'sqlite3': 'commonjs2 sqlite3',
   },
 };
